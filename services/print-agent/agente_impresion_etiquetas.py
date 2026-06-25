@@ -216,15 +216,30 @@ def imprimir_imagen(img, copias=1):
     impresora = win32print.GetDefaultPrinter()
     hdc = win32ui.CreateDC()
     hdc.CreatePrinterDC(impresora)
+
+    # Escalamos la imagen al área imprimible REAL de la etiqueta. La imagen se
+    # genera a 300 DPI, pero la impresora térmica suele ser de 203 DPI: si se
+    # dibuja a tamaño de píxel, se interpreta como un área mayor y se corta.
+    # GetDeviceCaps(HORZRES/VERTRES) da el área imprimible en píxeles del equipo.
+    HORZRES, VERTRES = 8, 10
+    ancho_imp = hdc.GetDeviceCaps(HORZRES)
+    alto_imp = hdc.GetDeviceCaps(VERTRES)
+    w, h = img.size
+    if ancho_imp > 0 and alto_imp > 0:
+        escala = min(ancho_imp / w, alto_imp / h)
+        nw, nh = max(1, int(w * escala)), max(1, int(h * escala))
+    else:
+        nw, nh = w, h
+
     for _ in range(max(1, copias)):
         hdc.StartDoc("Etiqueta Panol")
         hdc.StartPage()
         dib = ImageWin.Dib(img)
-        dib.draw(hdc.GetHandleOutput(), (0, 0, img.width, img.height))
+        dib.draw(hdc.GetHandleOutput(), (0, 0, nw, nh))
         hdc.EndPage()
         hdc.EndDoc()
     hdc.DeleteDC()
-    _log(f"Etiqueta enviada a la impresora '{impresora}' ({copias} copia/s).")
+    _log(f"Etiqueta enviada a '{impresora}' ({copias} copia/s, area {ancho_imp}x{alto_imp}px).")
     return None
 
 
