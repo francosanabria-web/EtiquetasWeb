@@ -17,10 +17,10 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, status
+from fastapi import FastAPI, HTTPException, status
 
 import cola_repo
-from models import EtiquetaCreate, Pedido, PedidoCreado
+from models import ConfirmarRequest, EtiquetaCreate, Pedido, PedidoCreado
 
 
 @asynccontextmanager
@@ -60,3 +60,29 @@ def crear_etiqueta(pedido: EtiquetaCreate) -> PedidoCreado:
 def listar_pendientes() -> list[Pedido]:
     """Devuelve los pedidos pendientes (para el polling del print-agent)."""
     return [Pedido(**p) for p in cola_repo.listar_pendientes()]
+
+
+@app.post(
+    "/etiquetas/{pedido_id}/confirmar",
+    response_model=Pedido,
+    tags=["etiquetas"],
+)
+def confirmar_etiqueta(pedido_id: int, confirmacion: ConfirmarRequest) -> Pedido:
+    """Aplica el resultado de impresión reportado por el print-agent."""
+    try:
+        actualizado = cola_repo.confirmar_pedido(
+            pedido_id,
+            confirmacion.resultado.value,
+            confirmacion.error_msg,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+
+    if actualizado is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No existe el pedido {pedido_id}.",
+        )
+    return Pedido(**actualizado)

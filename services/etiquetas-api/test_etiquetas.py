@@ -111,5 +111,60 @@ class TestListarPendientes(BaseTest):
         self.assertEqual(primero["intentos"], 0)
 
 
+class TestConfirmar(BaseTest):
+    def _crear(self) -> int:
+        return self.client.post("/etiquetas", json=PEDIDO_SIMPLE).json()["id"]
+
+    def test_confirmar_impreso(self) -> None:
+        pid = self._crear()
+        r = self.client.post(f"/etiquetas/{pid}/confirmar", json={"resultado": "impreso"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["estado"], "impreso")
+        # Ya no aparece en pendientes.
+        pend = self.client.get("/etiquetas/pendientes").json()
+        self.assertEqual(pend, [])
+
+    def test_confirmar_inexistente_404(self) -> None:
+        r = self.client.post("/etiquetas/9999/confirmar", json={"resultado": "impreso"})
+        self.assertEqual(r.status_code, 404)
+
+    def test_confirmar_dos_veces_409(self) -> None:
+        pid = self._crear()
+        self.client.post(f"/etiquetas/{pid}/confirmar", json={"resultado": "impreso"})
+        r = self.client.post(f"/etiquetas/{pid}/confirmar", json={"resultado": "impreso"})
+        self.assertEqual(r.status_code, 409)
+
+    def test_error_reintenta_y_descarta_a_los_3(self) -> None:
+        pid = self._crear()
+        # Intento 1: vuelve a pendiente.
+        r1 = self.client.post(
+            f"/etiquetas/{pid}/confirmar",
+            json={"resultado": "error", "error_msg": "sin papel"},
+        )
+        self.assertEqual(r1.json()["estado"], "pendiente")
+        self.assertEqual(r1.json()["intentos"], 1)
+        self.assertIn(pid, [p["id"] for p in self.client.get("/etiquetas/pendientes").json()])
+
+        # Intento 2: sigue pendiente.
+        r2 = self.client.post(
+            f"/etiquetas/{pid}/confirmar", json={"resultado": "error"}
+        )
+        self.assertEqual(r2.json()["estado"], "pendiente")
+        self.assertEqual(r2.json()["intentos"], 2)
+
+        # Intento 3: se descarta y sale de pendientes.
+        r3 = self.client.post(
+            f"/etiquetas/{pid}/confirmar", json={"resultado": "error"}
+        )
+        self.assertEqual(r3.json()["estado"], "descartado")
+        self.assertEqual(r3.json()["intentos"], 3)
+        self.assertEqual(self.client.get("/etiquetas/pendientes").json(), [])
+
+    def test_resultado_invalido_422(self) -> None:
+        pid = self._crear()
+        r = self.client.post(f"/etiquetas/{pid}/confirmar", json={"resultado": "queloque"})
+        self.assertEqual(r.status_code, 422)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
