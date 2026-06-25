@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Base de datos local de la cola de impresión (no se versiona)
+*.db
+cola.db
+
+# Credenciales de Firebase (NUNCA subir al repo)
+serviceAccountKey.json
+*serviceAccount*.json
+.env
+
+# Artefactos de etiquetas / imágenes temporales
+*.png
+_etiqueta_tmp.png
+etiqueta_*.png
+preview_*.png
+
+# Sistema operativo / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
