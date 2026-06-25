@@ -112,58 +112,101 @@ def generar_imagen_simple(texto_libre: str):
 
 # ======================= PROCESAMIENTO DE UN PEDIDO =======================
 
-def generar_imagen_codigo(codigo: str, descripcion: str, ubicacion: str, qr_data: str):
-    """
-    Etiqueta de código reconocido: código en caja negra (letra blanca, negrita) +
-    descripción + ubicación + QR a la derecha.
-
-    A diferencia del render heredado, acá el tamaño de fuente del código se ajusta
-    para que entre COMPLETO en la caja (los códigos largos no se recortan).
-    Reutiliza los helpers de bajo nivel del módulo heredado (fuentes, QR, medidas).
-    """
-    ancho_px = agente._mm_a_px(agente.LABEL_ANCHO_MM)
-    alto_px = agente._mm_a_px(agente.LABEL_ALTO_MM)
-
-    img = Image.new("RGB", (ancho_px, alto_px), "white")
-    draw = ImageDraw.Draw(img)
-    margen = max(6, ancho_px // 40)
-
-    # --- QR a la derecha ---
-    qr_lado = alto_px - 2 * margen
-    qr_img = agente._generar_qr(qr_data or codigo, qr_lado)
-    qr_x = ancho_px - qr_lado - margen
-    img.paste(qr_img, (qr_x, margen))
-
-    ancho_texto_max = qr_x - margen * 2
-    fuente_normal = agente._cargar_fuente(agente.FUENTE_NORMAL_CANDIDATAS, max(11, alto_px // 11))
-
-    y = margen
-    texto_codigo = str(codigo).upper()
-
-    # Achica la fuente del código hasta que entre en el ancho disponible.
-    pad = max(4, alto_px // 40)
-    tam = max(16, alto_px // 4)
-    while tam >= 12:
-        fuente_codigo = agente._cargar_fuente(agente.FUENTE_BOLD_CANDIDATAS, tam)
-        ancho_cod = draw.textlength(texto_codigo, font=fuente_codigo)
-        if ancho_cod <= ancho_texto_max - 2 * pad:
+def _fuente_que_entra(draw, texto, candidatas, max_w, max_h, tam_inicial, tam_min=10):
+    """Devuelve la fuente más grande (de las candidatas) con la que `texto` entra
+    en un recuadro de max_w × max_h."""
+    tam = tam_inicial
+    fuente = agente._cargar_fuente(candidatas, tam)
+    while tam > tam_min:
+        fuente = agente._cargar_fuente(candidatas, tam)
+        bbox = draw.textbbox((0, 0), texto, font=fuente)
+        if (bbox[2] - bbox[0]) <= max_w and (bbox[3] - bbox[1]) <= max_h:
             break
         tam -= 2
+    return fuente
 
-    bbox = draw.textbbox((0, 0), texto_codigo, font=fuente_codigo)
-    alto_codigo = bbox[3] - bbox[1]
-    caja_alto = alto_codigo + pad * 2
-    draw.rectangle([margen, y, margen + ancho_texto_max, y + caja_alto], fill="black")
-    draw.text((margen + pad, y + pad - bbox[1]), texto_codigo, font=fuente_codigo, fill="white")
-    y += caja_alto + pad
 
-    # Descripción (hasta 2 líneas).
-    for linea in agente._envolver_texto(draw, str(descripcion).upper(), fuente_normal, ancho_texto_max)[:2]:
-        draw.text((margen, y), linea, font=fuente_normal, fill="black")
-        y += fuente_normal.size + 3
+def _texto_centrado(draw, texto, fuente, cx, cy, fill):
+    """Dibuja `texto` centrado (horizontal y vertical) en el punto (cx, cy)."""
+    bbox = draw.textbbox((0, 0), texto, font=fuente)
+    w = bbox[2] - bbox[0]
+    h = bbox[3] - bbox[1]
+    draw.text((cx - w / 2 - bbox[0], cy - h / 2 - bbox[1]), texto, font=fuente, fill=fill)
 
-    y += 3
-    draw.text((margen, y), f"Ubic.: {ubicacion}", font=fuente_normal, fill="black")
+
+def generar_imagen_codigo(codigo: str, descripcion: str, ubicacion: str, _qr_data: str = ""):
+    """
+    Etiqueta de código reconocido, con el formato del sistema actual:
+
+        ┌──────────────────────────┐
+        │      DESCRIPCIÓN (2 lín)  │
+        ├──────────────────────────┤
+        │ ███  CÓDIGO  (blanco) ███ │   barra negra
+        ├──────────┬───────────────┤
+        │UBICACIÓN │     VALOR      │
+        └──────────┴───────────────┘
+    """
+    W = agente._mm_a_px(agente.LABEL_ANCHO_MM)
+    H = agente._mm_a_px(agente.LABEL_ALTO_MM)
+    img = Image.new("RGB", (W, H), "white")
+    draw = ImageDraw.Draw(img)
+
+    borde = max(2, W // 200)
+    pad = max(4, W // 60)
+
+    # Alturas de las tres secciones.
+    h_barra = int(H * 0.30)
+    h_ubic = int(H * 0.28)
+    h_desc = H - h_barra - h_ubic
+
+    y_barra0 = h_desc
+    y_barra1 = h_desc + h_barra
+    x_div = int(W * 0.34)  # ancho de la celda "UBICACIÓN"
+
+    # --- Bordes y líneas de la grilla ---
+    draw.rectangle([0, 0, W - 1, H - 1], outline="black", width=borde)
+    draw.rectangle([borde, y_barra0, W - borde, y_barra1], fill="black")
+    draw.line([(0, y_barra1), (W, y_barra1)], fill="black", width=borde)
+    draw.line([(x_div, y_barra1), (x_div, H)], fill="black", width=borde)
+
+    # --- Descripción (hasta 2 líneas, centrada) ---
+    desc = str(descripcion).upper().strip()
+    ancho_desc = W - 2 * pad
+    fuente_desc = agente._cargar_fuente(agente.FUENTE_BOLD_CANDIDATAS, max(14, int(h_desc * 0.42)))
+    lineas = agente._envolver_texto(draw, desc, fuente_desc, ancho_desc)
+    while len(lineas) > 2 and fuente_desc.size > 12:
+        fuente_desc = agente._cargar_fuente(agente.FUENTE_BOLD_CANDIDATAS, fuente_desc.size - 2)
+        lineas = agente._envolver_texto(draw, desc, fuente_desc, ancho_desc)
+    lineas = lineas[:2]
+    alto_linea = fuente_desc.size + 4
+    y_txt = (h_desc - alto_linea * len(lineas)) / 2
+    for ln in lineas:
+        _texto_centrado(draw, ln, fuente_desc, W / 2, y_txt + alto_linea / 2, "black")
+        y_txt += alto_linea
+
+    # --- Código en la barra negra (blanco, ajustado para entrar completo) ---
+    cod = str(codigo).upper().strip()
+    fuente_cod = _fuente_que_entra(
+        draw, cod, agente.FUENTE_BOLD_CANDIDATAS,
+        W - 2 * (borde + pad), h_barra - 2 * pad, int(h_barra * 0.8),
+    )
+    _texto_centrado(draw, cod, fuente_cod, W / 2, (y_barra0 + y_barra1) / 2, "white")
+
+    # --- Fila de ubicación: etiqueta + valor ---
+    cy_ubic = (y_barra1 + H) / 2
+    fuente_lbl = _fuente_que_entra(
+        draw, "UBICACIÓN", agente.FUENTE_BOLD_CANDIDATAS,
+        x_div - 2 * pad, h_ubic - 2 * pad, int(h_ubic * 0.5),
+    )
+    _texto_centrado(draw, "UBICACIÓN", fuente_lbl, x_div / 2, cy_ubic, "black")
+
+    valor = str(ubicacion).upper().strip()
+    fuente_val = _fuente_que_entra(
+        draw, valor or "-", agente.FUENTE_BOLD_CANDIDATAS,
+        (W - x_div) - 2 * pad, h_ubic - 2 * pad, int(h_ubic * 0.6),
+    )
+    _texto_centrado(draw, valor, fuente_val, (x_div + W) / 2, cy_ubic, "black")
+
     return img
 
 
@@ -172,12 +215,11 @@ def _render_pedido(pedido: dict):
     tipo = pedido.get("tipo")
     if tipo == "simple":
         return generar_imagen_simple(pedido.get("texto_libre") or "")
-    # tipo "codigo": código en negro + desc + ubic + QR
+    # tipo "codigo": descripción + barra de código + fila de ubicación
     return generar_imagen_codigo(
         codigo=pedido.get("codigo", ""),
         descripcion=pedido.get("descripcion", ""),
         ubicacion=pedido.get("ubicacion", ""),
-        qr_data=pedido.get("qr_data") or pedido.get("codigo", ""),
     )
 
 
