@@ -91,5 +91,25 @@ class TestCrearEtiqueta(BaseTest):
         self.assertEqual(r.status_code, 422)
 
 
+class TestListarPendientes(BaseTest):
+    def test_lista_vacia_al_inicio(self) -> None:
+        r = self.client.get("/etiquetas/pendientes")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json(), [])
+
+    def test_lista_devuelve_creados_en_orden_fifo(self) -> None:
+        id1 = self.client.post("/etiquetas", json=PEDIDO_SIMPLE).json()["id"]
+        id2 = self.client.post("/etiquetas", json=PEDIDO_CODIGO).json()["id"]
+        r = self.client.get("/etiquetas/pendientes")
+        self.assertEqual(r.status_code, 200)
+        ids = [p["id"] for p in r.json()]
+        self.assertEqual(ids, [id1, id2])
+        # El de tipo 'simple' no arrastra campos de código.
+        primero = r.json()[0]
+        self.assertEqual(primero["tipo"], "simple")
+        self.assertIsNone(primero["codigo"])
+        self.assertEqual(primero["intentos"], 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

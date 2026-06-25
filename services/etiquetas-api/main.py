@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, status
 
 import cola_repo
-from models import EtiquetaCreate, PedidoCreado
+from models import EtiquetaCreate, Pedido, PedidoCreado
 
 
 @asynccontextmanager
@@ -54,3 +54,9 @@ def crear_etiqueta(pedido: EtiquetaCreate) -> PedidoCreado:
     """Encola un pedido de impresión (estado inicial 'pendiente')."""
     creado = cola_repo.crear_pedido(pedido.model_dump(mode="json"))
     return PedidoCreado(id=creado["id"], estado=creado["estado"])
+
+
+@app.get("/etiquetas/pendientes", response_model=list[Pedido], tags=["etiquetas"])
+def listar_pendientes() -> list[Pedido]:
+    """Devuelve los pedidos pendientes (para el polling del print-agent)."""
+    return [Pedido(**p) for p in cola_repo.listar_pendientes()]
