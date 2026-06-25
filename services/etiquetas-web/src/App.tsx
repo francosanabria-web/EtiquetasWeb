@@ -221,7 +221,7 @@ function FormCodigo({
   return (
     <section className="card">
       <h2>Código reconocido</h2>
-      <p className="hint">Buscá el código en el catálogo; la etiqueta lleva código, descripción, ubicación y QR.</p>
+      <p className="hint">Buscá el código en el catálogo; la etiqueta lleva descripción, código y ubicación.</p>
 
       <div className="buscador">
         <input
@@ -240,14 +240,14 @@ function FormCodigo({
 
       {item && (
         <>
-          <div className="vista-previa codigo-preview">
-            <div className="cp-texto">
-              <span className="cp-codigo">{item.codigo}</span>
-              <span className="cp-desc">{item.descripcion}</span>
-              <span className="cp-ubic">Ubic.: {item.ubicacion}</span>
-            </div>
-            <div className="cp-qr" aria-hidden>
-              QR
+          <div className="vista-previa etq-real">
+            <div className="etq">
+              <div className="etq-desc">{item.descripcion}</div>
+              <div className="etq-codigo">{item.codigo}</div>
+              <div className="etq-ubic">
+                <div className="etq-ubic-lbl">UBICACIÓN</div>
+                <div className="etq-ubic-val">{item.ubicacion}</div>
+              </div>
             </div>
           </div>
 
