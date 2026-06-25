@@ -17,9 +17,10 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, status
 
 import cola_repo
+from models import EtiquetaCreate, PedidoCreado
 
 
 @asynccontextmanager
@@ -41,3 +42,15 @@ app = FastAPI(
 def health() -> dict[str, str]:
     """Chequeo simple de vida del servicio."""
     return {"estado": "ok", "servicio": "etiquetas-api"}
+
+
+@app.post(
+    "/etiquetas",
+    response_model=PedidoCreado,
+    status_code=status.HTTP_201_CREATED,
+    tags=["etiquetas"],
+)
+def crear_etiqueta(pedido: EtiquetaCreate) -> PedidoCreado:
+    """Encola un pedido de impresión (estado inicial 'pendiente')."""
+    creado = cola_repo.crear_pedido(pedido.model_dump(mode="json"))
+    return PedidoCreado(id=creado["id"], estado=creado["estado"])
