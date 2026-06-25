@@ -15,9 +15,11 @@ PC de la impresora.
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 
 import cola_repo
 from firebase_lectura import FirebaseNoConfigurado, buscar_catalogo
@@ -42,6 +44,18 @@ app = FastAPI(
     version="0.1.0",
     description="Microservicio de etiquetas para app_web_salidas (cola SQLite + Firestore solo lectura).",
     lifespan=lifespan,
+)
+
+# CORS: el frontend (Vite) corre en otro origen y/o en otra PC de la red local.
+# Por defecto se permite todo (herramienta interna de red local); se puede acotar
+# con la variable de entorno ETIQUETAS_CORS_ORIGINS (lista separada por comas).
+_origins_env = os.environ.get("ETIQUETAS_CORS_ORIGINS", "*").strip()
+_allow_origins = ["*"] if _origins_env == "*" else [o.strip() for o in _origins_env.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allow_origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
