@@ -21,6 +21,10 @@ _etiqueta_tmp.png
 etiqueta_*.png
 preview_*.png
 
+# Logs del print-agent
+log_impresion_etiquetas.txt
+*.log
+
 # Sistema operativo / editor
 .DS_Store
 Thumbs.db

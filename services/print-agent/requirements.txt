@@ -1,0 +1,8 @@
+# Dependencias del print-agent
+# Render de la etiqueta (imagen + QR):
+Pillow
+qrcode
+
+# Sólo en la PC real conectada a la impresora (Windows). Si no está, el agente
+# guarda un PNG de vista previa en vez de imprimir (útil para probar sin impresora):
+pywin32 ; sys_platform == "win32"
