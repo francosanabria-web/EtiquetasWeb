@@ -9,6 +9,8 @@ env/
 # Base de datos local de la cola de impresión (no se versiona)
 *.db
 cola.db
+*.db-wal
+*.db-shm
 
 # Credenciales de Firebase (NUNCA subir al repo)
 serviceAccountKey.json
