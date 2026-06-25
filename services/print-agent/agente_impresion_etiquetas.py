@@ -62,7 +62,7 @@ COLECCION_COLA = "cola_impresion_etiquetas"
 
 # Tamano de etiqueta fisica. AJUSTAR segun la etiquetadora real.
 LABEL_ANCHO_MM = 50
-LABEL_ALTO_MM = 30
+LABEL_ALTO_MM = 25
 DPI = 300
 
 LOG_FILE = os.path.join(BASE_DIR, "log_impresion_etiquetas.txt")
