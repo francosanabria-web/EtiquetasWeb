@@ -16,6 +16,7 @@ import unittest
 from fastapi.testclient import TestClient
 
 import cola_repo
+import firebase_lectura
 import main
 
 
@@ -164,6 +165,45 @@ class TestConfirmar(BaseTest):
         pid = self._crear()
         r = self.client.post(f"/etiquetas/{pid}/confirmar", json={"resultado": "queloque"})
         self.assertEqual(r.status_code, 422)
+
+
+class TestCatalogo(BaseTest):
+    """
+    No se golpea Firestore real: se reemplaza main.buscar_catalogo por una
+    función falsa. Así el endpoint se prueba sin red ni credenciales.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._orig = main.buscar_catalogo
+
+    def tearDown(self) -> None:
+        main.buscar_catalogo = self._orig
+        super().tearDown()
+
+    def test_catalogo_encontrado(self) -> None:
+        main.buscar_catalogo = lambda codigo: {
+            "codigo": codigo,
+            "descripcion": "RODAMIENTO 6204",
+            "ubicacion": "10065C",
+        }
+        r = self.client.get("/catalogo/A-10543")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["codigo"], "A-10543")
+        self.assertEqual(r.json()["ubicacion"], "10065C")
+
+    def test_catalogo_no_encontrado_404(self) -> None:
+        main.buscar_catalogo = lambda codigo: None
+        r = self.client.get("/catalogo/INEXISTENTE")
+        self.assertEqual(r.status_code, 404)
+
+    def test_firebase_no_configurado_503(self) -> None:
+        def _boom(codigo: str):
+            raise firebase_lectura.FirebaseNoConfigurado("sin credenciales")
+
+        main.buscar_catalogo = _boom
+        r = self.client.get("/catalogo/A-1")
+        self.assertEqual(r.status_code, 503)
 
 
 if __name__ == "__main__":

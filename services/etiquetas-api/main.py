@@ -20,7 +20,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, status
 
 import cola_repo
-from models import ConfirmarRequest, EtiquetaCreate, Pedido, PedidoCreado
+from firebase_lectura import FirebaseNoConfigurado, buscar_catalogo
+from models import (
+    CatalogoItem,
+    ConfirmarRequest,
+    EtiquetaCreate,
+    Pedido,
+    PedidoCreado,
+)
 
 
 @asynccontextmanager
@@ -42,6 +49,24 @@ app = FastAPI(
 def health() -> dict[str, str]:
     """Chequeo simple de vida del servicio."""
     return {"estado": "ok", "servicio": "etiquetas-api"}
+
+
+@app.get("/catalogo/{codigo}", response_model=CatalogoItem, tags=["catalogo"])
+def get_catalogo(codigo: str) -> CatalogoItem:
+    """Resuelve un código contra el catálogo de Firestore (solo lectura)."""
+    try:
+        item = buscar_catalogo(codigo)
+    except FirebaseNoConfigurado as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No se encontró el código '{codigo}' en el catálogo.",
+        )
+    return CatalogoItem(**item)
 
 
 @app.post(
