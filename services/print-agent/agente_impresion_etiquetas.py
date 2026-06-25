@@ -61,8 +61,9 @@ JSON_KEY = os.path.join(BASE_DIR, "serviceAccountKey.json")
 COLECCION_COLA = "cola_impresion_etiquetas"
 
 # Tamano de etiqueta fisica. AJUSTAR segun la etiquetadora real.
+# Medido con regla y confirmado contra el driver (Zebra GC420t, 203 dpi → 400x160 px).
 LABEL_ANCHO_MM = 50
-LABEL_ALTO_MM = 25
+LABEL_ALTO_MM = 20
 DPI = 300
 
 LOG_FILE = os.path.join(BASE_DIR, "log_impresion_etiquetas.txt")
@@ -199,6 +200,43 @@ def generar_imagen_etiqueta(codigo, descripcion, ubicacion, qr_data, cantidad=1)
 
 # ======================= IMPRESION =======================
 
+def diagnostico_impresora():
+    """Muestra qué reporta la impresora predeterminada (DPI, área imprimible,
+    tamaño de página configurado). Sirve para detectar si el driver tiene un
+    tamaño de etiqueta equivocado. No imprime nada."""
+    if win32print is None:
+        _log("No hay impresora de Windows disponible en este equipo.")
+        return
+    impresora = win32print.GetDefaultPrinter()
+    hdc = win32ui.CreateDC()
+    hdc.CreatePrinterDC(impresora)
+    caps = {
+        "HORZRES (imprimible px)": 8,
+        "VERTRES (imprimible px)": 10,
+        "LOGPIXELSX (dpi)": 88,
+        "LOGPIXELSY (dpi)": 90,
+        "PHYSICALWIDTH (pagina px)": 110,
+        "PHYSICALHEIGHT (pagina px)": 111,
+        "HORZSIZE (ancho mm)": 4,
+        "VERTSIZE (alto mm)": 6,
+    }
+    _log(f"=== Diagnóstico de '{impresora}' ===")
+    valores = {}
+    for nombre, idx in caps.items():
+        val = hdc.GetDeviceCaps(idx)
+        valores[nombre] = val
+        _log(f"  {nombre}: {val}")
+    dpi_x = valores["LOGPIXELSX (dpi)"] or DPI
+    dpi_y = valores["LOGPIXELSY (dpi)"] or DPI
+    _log(
+        f"  -> Pagina fisica = "
+        f"{valores['PHYSICALWIDTH (pagina px)'] / dpi_x * 25.4:.1f} x "
+        f"{valores['PHYSICALHEIGHT (pagina px)'] / dpi_y * 25.4:.1f} mm "
+        f"(esperado segun config: {LABEL_ANCHO_MM}x{LABEL_ALTO_MM} mm)"
+    )
+    hdc.DeleteDC()
+
+
 def imprimir_imagen(img, copias=1):
     """
     Envia la imagen a la impresora predeterminada de Windows.
@@ -217,19 +255,35 @@ def imprimir_imagen(img, copias=1):
     hdc = win32ui.CreateDC()
     hdc.CreatePrinterDC(impresora)
 
-    # Escalamos la imagen al área imprimible REAL de la etiqueta. La imagen se
-    # genera a 300 DPI, pero la impresora térmica suele ser de 203 DPI: si se
-    # dibuja a tamaño de píxel, se interpreta como un área mayor y se corta.
-    # GetDeviceCaps(HORZRES/VERTRES) da el área imprimible en píxeles del equipo.
-    HORZRES, VERTRES = 8, 10
+    # Constantes de GetDeviceCaps.
+    HORZRES, VERTRES = 8, 10          # área imprimible (px)
+    LOGPIXELSX, LOGPIXELSY = 88, 90   # DPI reales del dispositivo
+    PHYSICALWIDTH, PHYSICALHEIGHT = 110, 111  # tamaño total de página (px)
+
+    dpi_x = hdc.GetDeviceCaps(LOGPIXELSX) or DPI
+    dpi_y = hdc.GetDeviceCaps(LOGPIXELSY) or DPI
     ancho_imp = hdc.GetDeviceCaps(HORZRES)
     alto_imp = hdc.GetDeviceCaps(VERTRES)
-    w, h = img.size
-    if ancho_imp > 0 and alto_imp > 0:
-        escala = min(ancho_imp / w, alto_imp / h)
-        nw, nh = max(1, int(w * escala)), max(1, int(h * escala))
-    else:
-        nw, nh = w, h
+    pag_w = hdc.GetDeviceCaps(PHYSICALWIDTH)
+    pag_h = hdc.GetDeviceCaps(PHYSICALHEIGHT)
+
+    # Tamaño objetivo = tamaño FÍSICO real de la etiqueta (50×25 mm), en píxeles
+    # del dispositivo. Así imprime siempre al tamaño correcto sin importar qué
+    # hoja tenga configurada el driver (no estiramos para "llenar la página").
+    nw = max(1, round((LABEL_ANCHO_MM / 25.4) * dpi_x))
+    nh = max(1, round((LABEL_ALTO_MM / 25.4) * dpi_y))
+
+    # Salvaguarda: si el objetivo no entra en el área imprimible (driver con una
+    # etiqueta más chica), lo achicamos para que no se recorte.
+    if ancho_imp > 0 and alto_imp > 0 and (nw > ancho_imp or nh > alto_imp):
+        escala = min(ancho_imp / nw, alto_imp / nh)
+        nw, nh = max(1, int(nw * escala)), max(1, int(nh * escala))
+
+    _log(
+        f"Impresora '{impresora}': dpi={dpi_x}x{dpi_y}, "
+        f"imprimible={ancho_imp}x{alto_imp}px, pagina={pag_w}x{pag_h}px, "
+        f"etiqueta_destino={nw}x{nh}px ({LABEL_ANCHO_MM}x{LABEL_ALTO_MM}mm)."
+    )
 
     for _ in range(max(1, copias)):
         hdc.StartDoc("Etiqueta Panol")
@@ -239,7 +293,7 @@ def imprimir_imagen(img, copias=1):
         hdc.EndPage()
         hdc.EndDoc()
     hdc.DeleteDC()
-    _log(f"Etiqueta enviada a '{impresora}' ({copias} copia/s, area {ancho_imp}x{alto_imp}px).")
+    _log(f"Etiqueta enviada a '{impresora}' ({copias} copia/s).")
     return None
 
 

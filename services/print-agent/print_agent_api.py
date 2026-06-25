@@ -276,7 +276,16 @@ def main() -> None:
         action="store_true",
         help="No imprime: guarda cada etiqueta como PNG (para probar sin impresora real).",
     )
+    parser.add_argument(
+        "--diagnostico",
+        action="store_true",
+        help="Muestra qué reporta la impresora (DPI, área imprimible, tamaño de página) y sale.",
+    )
     args = parser.parse_args()
+
+    if args.diagnostico:
+        agente.diagnostico_impresora()
+        return
 
     if args.preview:
         # Fuerza la rama de vista previa de imprimir_imagen (guarda PNG).
