@@ -22,7 +22,33 @@ DATOS IMPORTANTES
 
 
 ==================================================================
-  PARA IMPRIMIR: abrir 3 ventanas de PowerShell en ESTA PC
+  MODO AUTOMATICO  (RECOMENDADO - ya instalado)
+==================================================================
+  Los 3 procesos arrancan SOLOS al iniciar sesion en esta PC y se
+  reinician solos si alguno se cae. No hace falta abrir ventanas.
+
+  >> Requisito: esta PC tiene que quedar con la SESION INICIADA
+     (logueada). Si se reinicia, basta con iniciar sesion.
+
+  Instalar / reinstalar el arranque automatico (una sola vez):
+     Click derecho en  scripts\instalar_autostart.ps1
+        -> "Ejecutar con PowerShell"
+     (o)  powershell -ExecutionPolicy Bypass -File scripts\instalar_autostart.ps1
+
+  Ver estado (si esta todo arriba):
+     powershell -ExecutionPolicy Bypass -File scripts\estado_impresion.ps1
+
+  Frenar todo (sigue activo para el proximo inicio de sesion):
+     powershell -ExecutionPolicy Bypass -File scripts\detener_impresion.ps1
+
+  Frenar y QUITAR el arranque automatico:
+     powershell -ExecutionPolicy Bypass -File scripts\detener_impresion.ps1 -Desinstalar
+
+  Logs (por si algo falla):  scripts\logs\
+
+
+==================================================================
+  MODO MANUAL  (alternativa / pruebas): 3 ventanas de PowerShell
 ==================================================================
 
 ------------------------------------------------------------------

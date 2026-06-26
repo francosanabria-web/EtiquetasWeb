@@ -16,6 +16,9 @@ cola.db
 serviceAccountKey.json
 *serviceAccount*.json
 .env
+# Config por-PC (URL de la API, etc.) - no se versiona
+.env.local
+.env.*.local
 
 # Artefactos de etiquetas / imágenes temporales
 *.png
