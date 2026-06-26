@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, buscarCatalogo, crearEtiqueta, getPendientes } from "./api";
+import { API_URL, ApiError, buscarCatalogo, crearEtiqueta, getPendientes } from "./api";
 import type { CatalogoItem, Pedido, TipoEtiqueta } from "./types";
 
 type Aviso = { tipo: "ok" | "error"; texto: string } | null;
@@ -62,6 +62,10 @@ export default function App() {
 
         <ColaPendientes />
       </main>
+
+      <footer className="pie">
+        Conectado a la API: <code>{API_URL}</code>
+      </footer>
 
       {aviso && <div className={`toast toast-${aviso.tipo}`}>{aviso.texto}</div>}
     </div>

@@ -82,29 +82,49 @@ def _doc_a_item(codigo_consultado: str, data: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _variantes(codigo: str) -> list[str]:
+    """Variantes a probar para tolerar mayúsculas/minúsculas y espacios.
+    Mantiene el orden y elimina duplicados (Firestore es sensible a mayúsculas)."""
+    base = codigo.strip()
+    candidatos = [base, base.upper(), base.lower(), base.replace(" ", "")]
+    vistos: list[str] = []
+    for c in candidatos:
+        if c and c not in vistos:
+            vistos.append(c)
+    return vistos
+
+
 def buscar_catalogo(codigo: str) -> Optional[dict[str, str]]:
     """
     Busca un código en el catálogo (SOLO LECTURA).
 
-    Estrategia: primero intenta el documento cuyo id es el código (caso común);
-    si no existe, hace una consulta por el campo de código. Devuelve un dict
+    Estrategia: para cada variante del código (tal cual, mayúsculas, minúsculas,
+    sin espacios) intenta primero el documento cuyo id es el código (caso común)
+    y luego una consulta por el campo de código. Devuelve un dict
     {codigo, descripcion, ubicacion} o None si no se encuentra.
     """
     codigo = str(codigo).strip()
     if not codigo:
         return None
 
+    from firebase_admin import firestore
+
     db = _get_db()
     col = db.collection(COLECCION_CATALOGO)
 
-    # 1) Documento por id == código.
-    doc = col.document(codigo).get()
-    if doc.exists:
-        return _doc_a_item(codigo, doc.to_dict() or {})
+    for variante in _variantes(codigo):
+        # 1) Documento por id == código.
+        doc = col.document(variante).get()
+        if doc.exists:
+            return _doc_a_item(variante, doc.to_dict() or {})
 
-    # 2) Consulta por el campo de código.
-    consulta = col.where(CAMPO_CODIGO, "==", codigo).limit(1).stream()
-    for encontrado in consulta:
-        return _doc_a_item(codigo, encontrado.to_dict() or {})
+        # 2) Consulta por el campo de código (sintaxis nueva con FieldFilter).
+        consulta = (
+            col.where(filter=firestore.FieldFilter(CAMPO_CODIGO, "==", variante))
+            .limit(1)
+            .stream()
+        )
+        for encontrado in consulta:
+            return _doc_a_item(variante, encontrado.to_dict() or {})
 
     return None

@@ -24,16 +24,32 @@ async function leerError(resp: Response): Promise<string> {
   }
 }
 
+/**
+ * fetch con mensaje de error claro: si falla la conexión (no hay red, API
+ * apagada o URL equivocada) avisa contra qué dirección se intentó. Esto evita
+ * el críptico "Failed to fetch" y deja ver si la web apunta a la API correcta.
+ */
+async function fetchApi(path: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(`${API_URL}${path}`, init);
+  } catch {
+    throw new ApiError(
+      0,
+      `No se pudo contactar la API en ${API_URL}. ¿Está encendida y es la dirección correcta?`
+    );
+  }
+}
+
 /** Busca un código en el catálogo. Devuelve null si no existe (404). */
 export async function buscarCatalogo(codigo: string): Promise<CatalogoItem | null> {
-  const resp = await fetch(`${API_URL}/catalogo/${encodeURIComponent(codigo)}`);
+  const resp = await fetchApi(`/catalogo/${encodeURIComponent(codigo)}`);
   if (resp.status === 404) return null;
   if (!resp.ok) throw new ApiError(resp.status, await leerError(resp));
   return (await resp.json()) as CatalogoItem;
 }
 
 export async function crearEtiqueta(payload: NuevaEtiqueta): Promise<PedidoCreado> {
-  const resp = await fetch(`${API_URL}/etiquetas`, {
+  const resp = await fetchApi(`/etiquetas`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -43,7 +59,7 @@ export async function crearEtiqueta(payload: NuevaEtiqueta): Promise<PedidoCread
 }
 
 export async function getPendientes(): Promise<Pedido[]> {
-  const resp = await fetch(`${API_URL}/etiquetas/pendientes`);
+  const resp = await fetchApi(`/etiquetas/pendientes`);
   if (!resp.ok) throw new ApiError(resp.status, await leerError(resp));
   return (await resp.json()) as Pedido[];
 }

@@ -235,6 +235,17 @@ textarea {
   margin: 4px 0 18px;
   background: #fbfdff;
 }
+.pie {
+  margin: 18px auto 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pie code {
+  background: #eef2f7;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
 .escala-valor {
   min-width: 64px;
   text-align: center;
