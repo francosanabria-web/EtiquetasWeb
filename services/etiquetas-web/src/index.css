@@ -235,6 +235,12 @@ textarea {
   margin: 4px 0 18px;
   background: #fbfdff;
 }
+.escala-valor {
+  min-width: 64px;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
 .simple-preview {
   display: flex;
   align-items: center;

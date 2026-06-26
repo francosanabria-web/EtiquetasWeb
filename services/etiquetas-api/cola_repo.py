@@ -55,6 +55,7 @@ _COLUMNAS = (
     "ubicacion",
     "qr_data",
     "cantidad",
+    "escala_fuente",
     "solicitado_por",
     "estado",
     "intentos",
@@ -91,6 +92,7 @@ def init_db() -> None:
                 ubicacion      TEXT,
                 qr_data        TEXT,
                 cantidad       INTEGER NOT NULL DEFAULT 1,
+                escala_fuente  REAL    NOT NULL DEFAULT 1.0,
                 solicitado_por TEXT,
                 estado         TEXT    NOT NULL DEFAULT 'pendiente',
                 intentos       INTEGER NOT NULL DEFAULT 0,
@@ -104,6 +106,18 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_etiquetas_estado "
             "ON etiquetas (estado, creado_en, id);"
         )
+        _migrar_columnas(conn)
+
+
+def _migrar_columnas(conn: sqlite3.Connection) -> None:
+    """Agrega columnas nuevas a bases ya creadas (migración simple e idempotente)."""
+    existentes = {fila["name"] for fila in conn.execute("PRAGMA table_info(etiquetas);")}
+    nuevas = {
+        "escala_fuente": "REAL NOT NULL DEFAULT 1.0",
+    }
+    for columna, definicion in nuevas.items():
+        if columna not in existentes:
+            conn.execute(f"ALTER TABLE etiquetas ADD COLUMN {columna} {definicion};")
 
 
 def _row_a_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -124,9 +138,9 @@ def crear_pedido(datos: dict[str, Any]) -> dict[str, Any]:
             """
             INSERT INTO etiquetas (
                 tipo, texto_libre, codigo, descripcion, ubicacion, qr_data,
-                cantidad, solicitado_por, estado, intentos, error_msg,
-                creado_en, actualizado_en
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?);
+                cantidad, escala_fuente, solicitado_por, estado, intentos,
+                error_msg, creado_en, actualizado_en
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?);
             """,
             (
                 datos.get("tipo"),
@@ -136,6 +150,7 @@ def crear_pedido(datos: dict[str, Any]) -> dict[str, Any]:
                 datos.get("ubicacion"),
                 datos.get("qr_data"),
                 int(datos.get("cantidad", 1) or 1),
+                float(datos.get("escala_fuente", 1.0) or 1.0),
                 datos.get("solicitado_por"),
                 ESTADO_PENDIENTE,
                 ahora,

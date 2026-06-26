@@ -16,6 +16,7 @@ PC de la impresora.
 from __future__ import annotations
 
 import os
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, status
@@ -32,10 +33,22 @@ from models import (
 )
 
 
+def _precalentar_firebase() -> None:
+    """Inicializa Firebase en segundo plano para que la PRIMERA búsqueda real no
+    pague el costo de arranque en frío (~15-20 s). Si Firebase no está
+    configurado, simplemente no hace nada (no rompe el arranque)."""
+    try:
+        buscar_catalogo("__warmup__")
+    except Exception:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Asegura que la tabla de la cola exista al arrancar.
     cola_repo.init_db()
+    # Calienta Firebase sin bloquear el arranque del servidor.
+    threading.Thread(target=_precalentar_firebase, daemon=True).start()
     yield
 
 

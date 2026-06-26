@@ -75,10 +75,14 @@ def _confirmar(api_url: str, pedido_id: int, resultado: str, error_msg: str | No
 
 # ======================= RENDER MODO "SIMPLE" =======================
 
-def generar_imagen_simple(texto_libre: str):
+def generar_imagen_simple(texto_libre: str, escala: float = 1.0):
     """
     Etiqueta de rotulación simple: SÓLO el texto libre, centrado.
     Sin QR, sin caja de código en negro. Reutiliza medidas y fuentes del agente.
+
+    `escala` (0.5–4.0) controla el tamaño de letra al estilo "editor de texto":
+    1.0 = normal; >1 agranda la letra. El texto siempre se reduce automáticamente
+    si no entra (nunca se desborda ni se corta la etiqueta).
     """
     ancho_px = agente._mm_a_px(agente.LABEL_ANCHO_MM)
     alto_px = agente._mm_a_px(agente.LABEL_ALTO_MM)
@@ -87,15 +91,22 @@ def generar_imagen_simple(texto_libre: str):
     draw = ImageDraw.Draw(img)
     margen = max(6, ancho_px // 40)
     ancho_texto_max = ancho_px - 2 * margen
+    alto_disponible = alto_px - 2 * margen
 
-    # Buscamos el tamaño de fuente más grande que entre (hasta 4 líneas).
+    try:
+        escala = float(escala)
+    except (TypeError, ValueError):
+        escala = 1.0
+    escala = max(0.5, min(4.0, escala))
+
+    # El tope base es ~1/4 del alto; la escala lo multiplica para poder agrandar.
     texto = str(texto_libre).strip().upper()
-    tam = max(14, alto_px // 4)
+    tam = max(14, int((alto_px // 4) * escala))
     while tam >= 12:
         fuente = agente._cargar_fuente(agente.FUENTE_BOLD_CANDIDATAS, tam)
         lineas = agente._envolver_texto(draw, texto, fuente, ancho_texto_max)
         alto_total = len(lineas) * (fuente.size + 4)
-        if len(lineas) <= 4 and alto_total <= (alto_px - 2 * margen):
+        if len(lineas) <= 4 and alto_total <= alto_disponible:
             break
         tam -= 2
 
@@ -214,7 +225,10 @@ def _render_pedido(pedido: dict):
     """Elige el render según el tipo de etiqueta."""
     tipo = pedido.get("tipo")
     if tipo == "simple":
-        return generar_imagen_simple(pedido.get("texto_libre") or "")
+        return generar_imagen_simple(
+            pedido.get("texto_libre") or "",
+            escala=pedido.get("escala_fuente", 1.0),
+        )
     # tipo "codigo": descripción + barra de código + fila de ubicación
     return generar_imagen_codigo(
         codigo=pedido.get("codigo", ""),

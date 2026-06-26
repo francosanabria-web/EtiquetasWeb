@@ -1,0 +1,93 @@
+==================================================================
+  ETIQUETAS - PANOL  ::  GUIA RAPIDA PARA IMPRIMIR
+==================================================================
+  Ultima actualizacion: 26/06/2026
+  Esta PC (la de la impresora de etiquetas) es el "servidor".
+  Sin esta PC encendida y con las 3 ventanas abiertas, NADIE imprime.
+------------------------------------------------------------------
+
+DATOS IMPORTANTES
+------------------------------------------------------------------
+  IP de esta PC (servidor) ....... 10.1.102.8
+  Puerto de la API ............... 8010
+  Puerto de la web ............... 5173
+  Impresora etiquetas ............ ZDesigner GC420t (203 dpi)
+  Tamano de etiqueta ............. 50 x 20 mm
+
+  >> Si las otras PCs dejan de conectar, lo mas probable es que
+     CAMBIO LA IP de esta PC. Verificala con el comando:
+         ipconfig
+     y busca "Direccion IPv4". Si cambio, avisar para actualizar
+     el archivo:  services\etiquetas-web\.env.local
+
+
+==================================================================
+  PARA IMPRIMIR: abrir 3 ventanas de PowerShell en ESTA PC
+==================================================================
+
+------------------------------------------------------------------
+VENTANA 1  ->  API (la cola / central)
+------------------------------------------------------------------
+cd C:\Users\Mantenimiento\Desktop\AppWebSalidas\services\etiquetas-api
+.\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8010
+
+  (IMPORTANTE: usar el python del .venv como arriba. Si se usa
+   solo "py" da el error: No module named uvicorn)
+
+
+------------------------------------------------------------------
+VENTANA 2  ->  AGENTE DE IMPRESION (saca de la cola e imprime)
+------------------------------------------------------------------
+cd C:\Users\Mantenimiento\Desktop\AppWebSalidas\services\print-agent
+py print_agent_api.py --api http://localhost:8010
+
+
+------------------------------------------------------------------
+VENTANA 3  ->  LA WEB (donde se cargan las etiquetas)
+------------------------------------------------------------------
+cd C:\Users\Mantenimiento\Desktop\AppWebSalidas\services\etiquetas-web
+npm run dev
+
+
+==================================================================
+  DESDE LAS OTRAS PCs DE PANOL
+==================================================================
+  Solo abrir el navegador (Chrome/Edge) en esta direccion:
+
+         http://10.1.102.8:5173
+
+  Ahi se cargan etiquetas simples o por codigo. Caen en la cola
+  y esta PC las imprime.
+
+
+==================================================================
+  PRIMERA VEZ EN ESTA PC (una sola vez): abrir puertos
+==================================================================
+  Abrir PowerShell COMO ADMINISTRADOR y pegar:
+
+New-NetFirewallRule -DisplayName "Etiquetas API 8010" -Direction Inbound -Protocol TCP -LocalPort 8010 -Action Allow
+New-NetFirewallRule -DisplayName "Etiquetas Web 5173" -Direction Inbound -Protocol TCP -LocalPort 5173 -Action Allow
+
+
+==================================================================
+  DIAGNOSTICO DE LA IMPRESORA (si sale mal el tamano)
+==================================================================
+cd C:\Users\Mantenimiento\Desktop\AppWebSalidas\services\print-agent
+py print_agent_api.py --diagnostico
+
+  Muestra dpi, area imprimible y tamano de pagina configurado.
+
+
+==================================================================
+  PROBLEMAS COMUNES
+==================================================================
+  * "No module named uvicorn"  -> usaste "py" en la Ventana 1.
+        Usa el comando con .\.venv\Scripts\python.exe (ver arriba).
+
+  * Las otras PC no encuentran codigos -> revisar que la VENTANA 1
+        (API) este corriendo SIN errores. La primera busqueda puede
+        tardar unos segundos (arranca Firebase).
+
+  * No conecta desde otra PC -> probable cambio de IP (ver arriba)
+        o falta abrir los puertos del firewall (ver arriba).
+==================================================================

@@ -36,6 +36,12 @@ class EtiquetaCreate(BaseModel):
     ubicacion: Optional[str] = None
     qr_data: Optional[str] = None
     cantidad: int = Field(default=1, ge=1, description="Cantidad de copias (>= 1).")
+    escala_fuente: float = Field(
+        default=1.0,
+        ge=0.5,
+        le=4.0,
+        description="Multiplicador del tamaño de letra (rótulo simple). 1.0 = normal.",
+    )
     solicitado_por: Optional[str] = Field(
         default=None, description="Usuario o dispositivo que pide la impresión."
     )
@@ -111,6 +117,7 @@ class Pedido(BaseModel):
     ubicacion: Optional[str] = None
     qr_data: Optional[str] = None
     cantidad: int
+    escala_fuente: float = 1.0
     solicitado_por: Optional[str] = None
     estado: str
     intentos: int

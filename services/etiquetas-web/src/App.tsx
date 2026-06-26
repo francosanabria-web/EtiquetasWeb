@@ -105,7 +105,14 @@ function FormSimple({
 }) {
   const [texto, setTexto] = useState("");
   const [cantidad, setCantidad] = useState(1);
+  const [escala, setEscala] = useState(1);
   const [enviando, setEnviando] = useState(false);
+
+  const ESCALA_MIN = 0.5;
+  const ESCALA_MAX = 3;
+  const ESCALA_PASO = 0.25;
+  const ajustarEscala = (delta: number) =>
+    setEscala((e) => Math.round(Math.min(ESCALA_MAX, Math.max(ESCALA_MIN, e + delta)) * 100) / 100);
 
   const enviar = async () => {
     if (!texto.trim()) {
@@ -118,11 +125,13 @@ function FormSimple({
         tipo: "simple",
         texto_libre: texto.trim(),
         cantidad,
+        escala_fuente: escala,
         solicitado_por: solicitante || undefined,
       });
       onAviso({ tipo: "ok", texto: `Etiqueta #${r.id} enviada a la cola.` });
       setTexto("");
       setCantidad(1);
+      setEscala(1);
     } catch (e) {
       onAviso({ tipo: "error", texto: e instanceof Error ? e.message : "Error al enviar." });
     } finally {
@@ -143,10 +152,35 @@ function FormSimple({
           onChange={(e) => setTexto(e.target.value)}
         />
       </div>
+      <div className="campo">
+        <label>Tamaño de letra</label>
+        <div className="stepper">
+          <button
+            type="button"
+            onClick={() => ajustarEscala(-ESCALA_PASO)}
+            disabled={escala <= ESCALA_MIN}
+            title="Achicar letra"
+          >
+            A−
+          </button>
+          <span className="escala-valor">{Math.round(escala * 100)}%</span>
+          <button
+            type="button"
+            onClick={() => ajustarEscala(ESCALA_PASO)}
+            disabled={escala >= ESCALA_MAX}
+            title="Agrandar letra"
+          >
+            A+
+          </button>
+        </div>
+      </div>
+
       <CantidadInput cantidad={cantidad} setCantidad={setCantidad} />
 
       <div className="vista-previa simple-preview">
-        <span>{texto.trim() || "Vista previa del texto"}</span>
+        <span style={{ fontSize: `${Math.round(22 * escala)}px` }}>
+          {texto.trim() || "Vista previa del texto"}
+        </span>
       </div>
 
       <button className="btn-primario" disabled={enviando} onClick={enviar}>

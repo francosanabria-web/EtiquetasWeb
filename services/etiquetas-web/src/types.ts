@@ -33,6 +33,7 @@ export type NuevaEtiqueta =
       tipo: "simple";
       texto_libre: string;
       cantidad: number;
+      escala_fuente?: number;
       solicitado_por?: string;
     }
   | {
