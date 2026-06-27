@@ -221,11 +221,9 @@ function FormCodigo({
       }
     } catch (e) {
       const msg =
-        e instanceof ApiError && e.status === 503
-          ? "El catálogo (Firebase) no está configurado en el servidor."
-          : e instanceof Error
-            ? e.message
-            : "Error al buscar.";
+        e instanceof ApiError || e instanceof Error
+          ? e.message
+          : "Error al buscar.";
       onAviso({ tipo: "error", texto: msg });
     } finally {
       setBuscando(false);

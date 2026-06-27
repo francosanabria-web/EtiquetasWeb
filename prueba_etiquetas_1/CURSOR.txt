@@ -1,0 +1,37 @@
+Revisé el código generado. Acá va la respuesta a las dos cosas:
+
+## ¿Se modificó algo en Firebase?
+
+**No, nada.** Firebase está intacto:
+
+- El subagente **no pudo ejecutar ningún comando** (la terminal del entorno no respondió en ningún intento), así que **no se escribió ni un solo dato** en Firestore.
+- El código solo **lee** la colección `articulos` que ya tenías (nunca la modifica).
+- La colección nueva `cola_impresion` **todavía no existe**: se va a crear sola, automáticamente, recién la primera vez que vos corras `enviar` o `escuchar` mañana. Hasta entonces no hay ningún cambio en tu base.
+
+En resumen: hoy solo se crearon **archivos locales** en la carpeta del proyecto. La nube no se tocó.
+
+## Archivos que necesitás para probar mañana
+
+Todos están dentro de `C:\Users\Franco\Desktop\Franco\Desktop\Franco\sistema_panol v1\`. Lo más simple es llevarte la carpeta del proyecto, pero si querés solo lo nuevo + lo indispensable:
+
+**En la PC con la impresora USB (la que imprime):**
+- `modulo_etiquetas.py` — el módulo principal
+- `serviceAccountKey.json` — **ya existía**, es la credencial de Firebase (sin esto no conecta). ⚠️ Es un archivo secreto: mandátelo por un medio privado, no lo subas a lugares públicos.
+- `IMPRIMIR_ETIQUETAS.bat` — doble clic para dejarla escuchando
+- `requirements_etiquetas.txt` — para `pip install -r`
+- `VER_DEMO_ETIQUETA.bat` y `ETIQUETAS_LEEME.md` — para ver el diseño y la guía
+
+**Si vas a enviar desde OTRA PC (por script):**
+- `modulo_etiquetas.py` + `serviceAccountKey.json`
+
+**Si vas a enviar desde el celular/web:**
+- `etiquetas_web/index.html` — pero ojo: necesita que pegues **una vez** la config web pública de Firebase (apiKey/appId), que sacás de la consola de Firebase → Configuración → Tus apps → Web. El `projectId` ya está puesto.
+
+### Lo único pendiente para confirmar mañana
+Como no se pudo correr nada acá, el primer paso en la estación real es:
+
+```
+pip install -r requirements_etiquetas.txt
+```
+
+y después un `python modulo_etiquetas.py demo` para ver la etiqueta real (con QR) antes de conectar la impresora. ¿Querés que te deje todo empaquetado en un `.zip` listo para mandar, o preferís copiar la carpeta tal cual?

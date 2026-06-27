@@ -1,0 +1,4 @@
+pillow
+qrcode
+firebase-admin
+pywin32 ; sys_platform == "win32"

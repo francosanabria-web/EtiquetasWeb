@@ -116,4 +116,10 @@ py print_agent_api.py --diagnostico
 
   * No conecta desde otra PC -> probable cambio de IP (ver arriba)
         o falta abrir los puertos del firewall (ver arriba).
+
+  * "Cuota de lecturas de Firebase agotada" al buscar codigos -> la API
+        responde pero Firestore rechazo lecturas (429). Las etiquetas SIMPLES
+        siguen funcionando. Esperar unos minutos (a veces hasta 1 h) o revisar
+        cuota en console.firebase.google.com. La API ahora usa cache para
+        reducir lecturas repetidas.
 ==================================================================

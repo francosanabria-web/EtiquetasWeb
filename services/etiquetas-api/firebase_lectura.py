@@ -15,6 +15,7 @@ arriba para ajustarlos en otra tarea sin tocar el resto del código.
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Optional
 
 # ----------------------------------------------------------------------------
@@ -24,6 +25,10 @@ COLECCION_CATALOGO = "articulos"   # nombre de la colección de artículos
 CAMPO_CODIGO = "codigo"            # campo que guarda el código del artículo
 CAMPO_DESCRIPCION = "desc"         # campo de la descripción
 CAMPO_UBICACION = "ubicacion"      # campo de la ubicación
+
+# Caché en memoria para no agotar la cuota diaria de lecturas de Firestore.
+# TTL en segundos (por defecto 10 min). 0 = desactivar caché.
+CACHE_TTL_SEG = int(os.environ.get("ETIQUETAS_CACHE_TTL", "600"))
 
 # Ruta del archivo de credenciales de servicio (firebase-admin).
 # Se puede sobreescribir con la variable de entorno GOOGLE_APPLICATION_CREDENTIALS.
@@ -37,7 +42,17 @@ class FirebaseNoConfigurado(RuntimeError):
     """Se lanza cuando faltan credenciales o la librería firebase-admin."""
 
 
+class FirebaseQuotaExcedida(RuntimeError):
+    """Firestore rechazó la lectura (429 / cuota diaria o rate limit)."""
+
+
 _db = None  # cliente Firestore cacheado (se inicializa una sola vez)
+_cache: dict[str, tuple[float, Optional[dict[str, str]]]] = {}
+
+
+def inicializar_firebase() -> None:
+    """Conecta el cliente Firestore sin hacer lecturas (warmup seguro)."""
+    _get_db()
 
 
 def _get_db():
@@ -83,42 +98,49 @@ def _doc_a_item(codigo_consultado: str, data: dict[str, Any]) -> dict[str, str]:
 
 
 def _variantes(codigo: str) -> list[str]:
-    """Variantes a probar para tolerar mayúsculas/minúsculas y espacios.
-    Mantiene el orden y elimina duplicados (Firestore es sensible a mayúsculas)."""
+    """Máximo 2 variantes (mayúsculas primero) para minimizar lecturas."""
     base = codigo.strip()
-    candidatos = [base, base.upper(), base.lower(), base.replace(" ", "")]
+    upper = base.upper()
     vistos: list[str] = []
-    for c in candidatos:
+    for c in (upper, base):
         if c and c not in vistos:
             vistos.append(c)
     return vistos
 
 
-def buscar_catalogo(codigo: str) -> Optional[dict[str, str]]:
-    """
-    Busca un código en el catálogo (SOLO LECTURA).
+def _leer_cache(clave: str) -> Optional[dict[str, str]] | object:
+    """Devuelve el item cacheado, None si no está, o _SIN_CACHE si TTL=0."""
+    if CACHE_TTL_SEG <= 0:
+        return _SIN_CACHE
+    entry = _cache.get(clave)
+    if not entry:
+        return _SIN_CACHE
+    expira, valor = entry
+    if time.time() >= expira:
+        del _cache[clave]
+        return _SIN_CACHE
+    return valor
 
-    Estrategia: para cada variante del código (tal cual, mayúsculas, minúsculas,
-    sin espacios) intenta primero el documento cuyo id es el código (caso común)
-    y luego una consulta por el campo de código. Devuelve un dict
-    {codigo, descripcion, ubicacion} o None si no se encuentra.
-    """
-    codigo = str(codigo).strip()
-    if not codigo:
-        return None
 
+_SIN_CACHE = object()
+
+
+def _guardar_cache(clave: str, valor: Optional[dict[str, str]]) -> None:
+    if CACHE_TTL_SEG <= 0:
+        return
+    _cache[clave] = (time.time() + CACHE_TTL_SEG, valor)
+
+
+def _buscar_variante(col, variante: str) -> Optional[dict[str, str]]:
+    """Una variante: primero doc por id (1 lectura); query solo si no existe."""
     from firebase_admin import firestore
+    from google.api_core import exceptions as gax
 
-    db = _get_db()
-    col = db.collection(COLECCION_CATALOGO)
-
-    for variante in _variantes(codigo):
-        # 1) Documento por id == código.
+    try:
         doc = col.document(variante).get()
         if doc.exists:
             return _doc_a_item(variante, doc.to_dict() or {})
 
-        # 2) Consulta por el campo de código (sintaxis nueva con FieldFilter).
         consulta = (
             col.where(filter=firestore.FieldFilter(CAMPO_CODIGO, "==", variante))
             .limit(1)
@@ -126,5 +148,39 @@ def buscar_catalogo(codigo: str) -> Optional[dict[str, str]]:
         )
         for encontrado in consulta:
             return _doc_a_item(variante, encontrado.to_dict() or {})
+    except gax.ResourceExhausted as exc:
+        raise FirebaseQuotaExcedida(
+            "Cuota de lecturas de Firebase agotada temporalmente. "
+            "Esperá unos minutos o revisá el plan de Firestore. "
+            "Las etiquetas simples siguen funcionando."
+        ) from exc
 
     return None
+
+
+def buscar_catalogo(codigo: str) -> Optional[dict[str, str]]:
+    """
+    Busca un código en el catálogo (SOLO LECTURA).
+
+    Usa caché en memoria y pocas lecturas por búsqueda (doc id primero).
+    """
+    codigo = str(codigo).strip()
+    if not codigo:
+        return None
+
+    clave_cache = codigo.upper()
+    cached = _leer_cache(clave_cache)
+    if cached is not _SIN_CACHE:
+        return cached
+
+    db = _get_db()
+    col = db.collection(COLECCION_CATALOGO)
+
+    resultado: Optional[dict[str, str]] = None
+    for variante in _variantes(codigo):
+        resultado = _buscar_variante(col, variante)
+        if resultado is not None:
+            break
+
+    _guardar_cache(clave_cache, resultado)
+    return resultado

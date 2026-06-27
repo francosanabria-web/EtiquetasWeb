@@ -23,7 +23,12 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
 import cola_repo
-from firebase_lectura import FirebaseNoConfigurado, buscar_catalogo
+from firebase_lectura import (
+    FirebaseNoConfigurado,
+    FirebaseQuotaExcedida,
+    buscar_catalogo,
+    inicializar_firebase,
+)
 from models import (
     CatalogoItem,
     ConfirmarRequest,
@@ -34,11 +39,9 @@ from models import (
 
 
 def _precalentar_firebase() -> None:
-    """Inicializa Firebase en segundo plano para que la PRIMERA búsqueda real no
-    pague el costo de arranque en frío (~15-20 s). Si Firebase no está
-    configurado, simplemente no hace nada (no rompe el arranque)."""
+    """Conecta Firebase sin lecturas (evita gastar cuota al arrancar)."""
     try:
-        buscar_catalogo("__warmup__")
+        inicializar_firebase()
     except Exception:
         pass
 
@@ -84,6 +87,10 @@ def get_catalogo(codigo: str) -> CatalogoItem:
     try:
         item = buscar_catalogo(codigo)
     except FirebaseNoConfigurado as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    except FirebaseQuotaExcedida as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc

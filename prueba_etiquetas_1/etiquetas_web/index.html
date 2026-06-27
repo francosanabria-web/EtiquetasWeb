@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Etiquetas Pañol</title>
+<style>
+  :root{
+    --azul:#2c3e50; --azul2:#34495e; --verde:#27ae60; --rojo:#c0392b;
+    --gris:#ecf0f1; --borde:#d5dbdb;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:'Segoe UI',Arial,sans-serif; background:var(--gris);
+    color:#2c3e50;
+  }
+  header{
+    background:var(--azul); color:#fff; padding:14px 18px;
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  }
+  header h1{font-size:18px; margin:0; flex:1;}
+  .badge{font-size:12px; padding:4px 10px; border-radius:20px; background:#7f8c8d;}
+  .badge.ok{background:var(--verde);} .badge.off{background:var(--rojo);}
+  .wrap{max-width:980px; margin:0 auto; padding:16px; display:grid;
+        grid-template-columns:1fr 1fr; gap:16px;}
+  @media(max-width:760px){.wrap{grid-template-columns:1fr;}}
+  .card{background:#fff; border:1px solid var(--borde); border-radius:12px;
+        padding:16px; box-shadow:0 2px 6px rgba(0,0,0,.05);}
+  .card h2{margin:0 0 12px; font-size:15px; color:var(--azul2);
+           text-transform:uppercase; letter-spacing:.5px;}
+  label{display:block; font-size:12px; font-weight:600; margin:10px 0 4px; color:#555;}
+  input,select{width:100%; padding:10px; border:1px solid var(--borde);
+        border-radius:8px; font-size:14px;}
+  input:focus,select:focus{outline:none; border-color:var(--azul);}
+  .row{display:flex; gap:8px;}
+  .row>*{flex:1;}
+  button{cursor:pointer; border:none; border-radius:8px; padding:12px 14px;
+         font-size:14px; font-weight:700; color:#fff; background:var(--azul);}
+  button.verde{background:var(--verde);} button.gris{background:#95a5a6;}
+  button:disabled{opacity:.5; cursor:not-allowed;}
+  .full{width:100%; margin-top:14px;}
+  .preview-box{display:flex; justify-content:center; align-items:center;
+        background:#f4f6f7; border:1px dashed var(--borde); border-radius:10px;
+        padding:14px;}
+  canvas{background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.2); max-width:100%; height:auto;}
+  .results{max-height:200px; overflow:auto; border:1px solid var(--borde);
+           border-radius:8px; margin-top:6px;}
+  .results div{padding:8px 10px; border-bottom:1px solid #f0f0f0; cursor:pointer; font-size:13px;}
+  .results div:hover{background:#eaf2f8;}
+  .results small{color:#7f8c8d;}
+  .msg{margin-top:12px; padding:10px; border-radius:8px; font-size:13px; display:none;}
+  .msg.show{display:block;}
+  .msg.ok{background:#d5f5e3; color:#1e8449;}
+  .msg.err{background:#fadbd8; color:#922b21;}
+  details{margin-top:14px; font-size:12px;}
+  summary{cursor:pointer; color:var(--azul); font-weight:600;}
+  .cfg input{margin-bottom:6px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>🏷️ Etiquetas Pañol</h1>
+  <span id="estadoNube" class="badge">Conectando…</span>
+</header>
+
+<div class="wrap">
+  <!-- COLUMNA IZQUIERDA: datos -->
+  <div class="card">
+    <h2>Datos de la etiqueta</h2>
+
+    <label>Buscar artículo (código o descripción)</label>
+    <input id="busqueda" placeholder="Ej: rodamiento 6204…" autocomplete="off" />
+    <div id="resultados" class="results" style="display:none;"></div>
+
+    <label>Código</label>
+    <input id="codigo" placeholder="A-10543" />
+
+    <label>Descripción</label>
+    <input id="descripcion" placeholder="RODAMIENTO RIGIDO DE BOLAS 6204 2RS" />
+
+    <label>Ubicación</label>
+    <input id="ubicacion" placeholder="EST 3 - FILA B - CAJON 12" />
+
+    <div class="row" style="margin-top:10px;">
+      <div>
+        <label>Copias</label>
+        <input id="copias" type="number" value="1" min="1" />
+      </div>
+      <div>
+        <label>Origen</label>
+        <input id="origen" value="web-movil" />
+      </div>
+    </div>
+
+    <button id="btnEnviar" class="verde full">📤 Enviar a la impresora</button>
+    <div id="msg" class="msg"></div>
+
+    <details class="cfg">
+      <summary>⚙️ Configuración de Firebase (pegá tu config web una vez)</summary>
+      <p>Firebase Console → ⚙️ Configuración del proyecto → Tus apps → Web → SDK config.
+         Se guarda en este navegador.</p>
+      <input id="cfgApiKey" placeholder="apiKey" />
+      <input id="cfgAuthDomain" placeholder="authDomain (sistemapanol-a1bd4.firebaseapp.com)" />
+      <input id="cfgProjectId" placeholder="projectId (sistemapanol-a1bd4)" />
+      <input id="cfgAppId" placeholder="appId" />
+      <button id="btnGuardarCfg" class="gris full">Guardar y conectar</button>
+    </details>
+  </div>
+
+  <!-- COLUMNA DERECHA: vista previa -->
+  <div class="card">
+    <h2>Vista previa del diseño</h2>
+    <div class="preview-box">
+      <canvas id="lienzo" width="600" height="360"></canvas>
+    </div>
+    <p style="font-size:12px;color:#7f8c8d;margin-top:10px;">
+      La etiqueta se imprime en la PC conectada por USB a la impresora
+      (debe estar corriendo <code>python modulo_etiquetas.py escuchar</code>).
+    </p>
+  </div>
+</div>
+
+<!-- Librería QR (offline-friendly vía CDN) -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, collection, addDoc, getDocs, query, limit, serverTimestamp }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// ---- Config: se intenta cargar de localStorage; projectId prellenado ----
+const DEFAULT_CFG = {
+  apiKey: "",
+  authDomain: "sistemapanol-a1bd4.firebaseapp.com",
+  projectId: "sistemapanol-a1bd4",
+  appId: ""
+};
+function cargarCfg(){
+  try { return {...DEFAULT_CFG, ...JSON.parse(localStorage.getItem("fbcfg")||"{}")}; }
+  catch(e){ return {...DEFAULT_CFG}; }
+}
+
+let db = null, articulos = [];
+const $ = id => document.getElementById(id);
+const estadoNube = $("estadoNube");
+
+// ---------------- DIBUJO DE LA ETIQUETA (espejo del diseño Python) -------------
+async function dibujar(){
+  const c = $("lienzo"), ctx = c.getContext("2d");
+  const W = c.width, H = c.height, m = 18;
+  const codigo = ($("codigo").value || "").trim();
+  const desc = ($("descripcion").value || "").trim();
+  const ubic = ($("ubicacion").value || "").trim() || "S/U";
+
+  ctx.fillStyle = "#fff"; ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle = "#000"; ctx.lineWidth = 2; ctx.strokeRect(2,2,W-4,H-4);
+
+  // QR arriba a la derecha
+  const qrLado = Math.round(H*0.46);
+  if (codigo && window.QRCode){
+    try{
+      const tmp = document.createElement("canvas");
+      await window.QRCode.toCanvas(tmp, codigo, {margin:1, width:qrLado});
+      ctx.drawImage(tmp, W-m-qrLado, m, qrLado, qrLado);
+    }catch(e){}
+  }
+  const anchoTexto = (W - m - qrLado - m) - m;
+
+  // Descripción
+  ctx.textBaseline = "top"; ctx.fillStyle = "#555";
+  ctx.font = "600 13px Segoe UI, Arial";
+  ctx.fillText("DESCRIPCIÓN", m, m);
+  let y = m + 18;
+  ctx.fillStyle = "#000"; ctx.font = "bold 24px Segoe UI, Arial";
+  for (const ln of envolver(ctx, desc, anchoTexto).slice(0,3)){
+    ctx.fillText(ln, m, y); y += 28;
+  }
+
+  // CÓDIGO en caja negra, letras blancas
+  const cajaTop = Math.max(y+8, m + qrLado + 8);
+  const cajaH = Math.round(H*0.27);
+  ctx.fillStyle = "#000"; ctx.fillRect(m, cajaTop, W-2*m, cajaH);
+  let tam = cajaH;
+  ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  do { ctx.font = "bold "+tam+"px Segoe UI, Arial"; tam -= 2; }
+  while (tam > 10 && ctx.measureText(codigo||" ").width > (W-2*m-20));
+  ctx.fillText(codigo, W/2, cajaTop + cajaH/2);
+  ctx.textAlign = "left"; ctx.textBaseline = "top";
+
+  // UBICACIÓN
+  let uy = cajaTop + cajaH + 8;
+  ctx.fillStyle = "#555"; ctx.font = "600 13px Segoe UI, Arial";
+  ctx.fillText("UBICACIÓN", m, uy); uy += 18;
+  ctx.fillStyle = "#000"; ctx.font = "bold 20px Segoe UI, Arial";
+  ctx.fillText(ubic, m, uy);
+}
+function envolver(ctx, texto, anchoMax){
+  const pal = String(texto).split(/\s+/).filter(Boolean);
+  if(!pal.length) return [""];
+  const out = []; let act = pal[0];
+  for(let i=1;i<pal.length;i++){
+    const p = act+" "+pal[i];
+    if(ctx.measureText(p).width <= anchoMax) act = p;
+    else { out.push(act); act = pal[i]; }
+  }
+  out.push(act); return out;
+}
+
+// ---------------- FIREBASE ----------------
+async function conectar(){
+  const cfg = cargarCfg();
+  if(!cfg.apiKey || !cfg.appId){
+    estadoNube.textContent = "Modo demo (sin nube)";
+    estadoNube.className = "badge off";
+    return false;
+  }
+  try{
+    const app = initializeApp(cfg);
+    db = getFirestore(app);
+    estadoNube.textContent = "☁️ Nube OK";
+    estadoNube.className = "badge ok";
+    await cargarArticulos();
+    return true;
+  }catch(e){
+    estadoNube.textContent = "Error de nube";
+    estadoNube.className = "badge off";
+    console.error(e);
+    return false;
+  }
+}
+
+async function cargarArticulos(){
+  if(!db) return;
+  try{
+    const snap = await getDocs(query(collection(db,"articulos"), limit(2000)));
+    articulos = [];
+    snap.forEach(d=>{
+      const a = d.data();
+      articulos.push({
+        codigo: a.codigo || d.id,
+        descripcion: a.desc || a.descripcion || "",
+        ubicacion: a.ubicacion || "S/U"
+      });
+    });
+    console.log("Artículos cargados:", articulos.length);
+  }catch(e){ console.error("No se pudieron cargar artículos:", e); }
+}
+
+// ---------------- BUSCADOR ----------------
+function buscar(){
+  const q = $("busqueda").value.trim().toUpperCase();
+  const cont = $("resultados");
+  if(!q){ cont.style.display="none"; return; }
+  const pal = q.split(/\s+/);
+  const res = articulos.filter(a=>{
+    const txt = (a.codigo+" "+a.descripcion).toUpperCase();
+    return pal.every(p=>txt.includes(p));
+  }).slice(0,30);
+  cont.innerHTML = res.length
+    ? res.map(a=>`<div data-cod="${esc(a.codigo)}">
+        <strong>${esc(a.codigo)}</strong> — ${esc(a.descripcion)}<br>
+        <small>📍 ${esc(a.ubicacion)}</small></div>`).join("")
+    : `<div><small>Sin resultados${db?"":" (cargá la config de Firebase para buscar)"}</small></div>`;
+  cont.style.display="block";
+  cont.querySelectorAll("div[data-cod]").forEach(el=>{
+    el.onclick = ()=>{
+      const a = articulos.find(x=>String(x.codigo)===el.dataset.cod);
+      if(a){ $("codigo").value=a.codigo; $("descripcion").value=a.descripcion;
+             $("ubicacion").value=a.ubicacion; cont.style.display="none"; dibujar(); }
+    };
+  });
+}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+// ---------------- ENVIAR A LA COLA ----------------
+async function enviar(){
+  const codigo = $("codigo").value.trim();
+  if(!codigo){ return mostrar("Falta el código.", false); }
+  if(!db){ return mostrar("Sin conexión a la nube. Cargá la config de Firebase.", false); }
+  try{
+    $("btnEnviar").disabled = true;
+    await addDoc(collection(db,"cola_impresion"),{
+      codigo,
+      descripcion: $("descripcion").value.trim(),
+      ubicacion: $("ubicacion").value.trim() || "S/U",
+      copias: parseInt($("copias").value||"1",10),
+      estado: "pendiente",
+      origen: $("origen").value.trim() || "web",
+      creado: serverTimestamp()
+    });
+    mostrar("✅ Etiqueta enviada a la impresora.", true);
+  }catch(e){
+    mostrar("Error al enviar: "+e.message, false);
+  }finally{
+    $("btnEnviar").disabled = false;
+  }
+}
+function mostrar(txt, ok){
+  const m = $("msg");
+  m.textContent = txt;
+  m.className = "msg show " + (ok?"ok":"err");
+  setTimeout(()=>m.className="msg", 4000);
+}
+
+// ---------------- EVENTOS ----------------
+["codigo","descripcion","ubicacion"].forEach(id=> $(id).addEventListener("input", dibujar));
+$("busqueda").addEventListener("input", buscar);
+$("btnEnviar").addEventListener("click", enviar);
+$("btnGuardarCfg").addEventListener("click", ()=>{
+  const cfg = {
+    apiKey: $("cfgApiKey").value.trim(),
+    authDomain: $("cfgAuthDomain").value.trim() || DEFAULT_CFG.authDomain,
+    projectId: $("cfgProjectId").value.trim() || DEFAULT_CFG.projectId,
+    appId: $("cfgAppId").value.trim()
+  };
+  localStorage.setItem("fbcfg", JSON.stringify(cfg));
+  location.reload();
+});
+
+// Prefill campos de config con lo guardado
+(function(){
+  const c = cargarCfg();
+  $("cfgApiKey").value=c.apiKey||""; $("cfgAuthDomain").value=c.authDomain||"";
+  $("cfgProjectId").value=c.projectId||""; $("cfgAppId").value=c.appId||"";
+})();
+
+// Datos de ejemplo para ver el diseño al instante
+$("codigo").value = "A-10543";
+$("descripcion").value = "RODAMIENTO RIGIDO DE BOLAS 6204 2RS SKF";
+$("ubicacion").value = "EST 3 - FILA B - CAJON 12";
+
+dibujar();
+conectar();
+</script>
+</body>
+</html>
