@@ -2,8 +2,9 @@
 #  setup_github.ps1 — Conectar AppWebSalidas a un repo nuevo en GitHub
 #
 #  Uso (después de crear el repo vacío en github.com):
-#    powershell -ExecutionPolicy Bypass -File scripts\setup_github.ps1 `
-#      -RepoUrl "https://github.com/TU_USUARIO/AppWebSalidas.git"
+#    powershell -ExecutionPolicy Bypass -File "C:\Users\Mantenimiento\Desktop\AppWebSalidas\scripts\setup_github.ps1" -RepoUrl "https://github.com/TU_USUARIO/TU_REPO.git"
+#
+#  IMPORTANTE: usar -File y la ruta completa; no ejecutar el .ps1 solo con Enter.
 # ============================================================================
 
 param(
@@ -15,7 +16,11 @@ $ErrorActionPreference = "Stop"
 $Raiz = Split-Path -Parent $PSScriptRoot
 Set-Location $Raiz
 
-if (git remote get-url origin 2>$null) {
+# Quitar comillas si el usuario las pegó dentro del valor.
+$RepoUrl = $RepoUrl.Trim().Trim('"').Trim("'")
+
+$remoteActual = git remote 2>$null | Select-String -Pattern "^origin$" -Quiet
+if ($remoteActual) {
   Write-Host "Remote 'origin' ya existe:" (git remote get-url origin)
   $r = Read-Host "¿Reemplazar? (s/N)"
   if ($r -ne "s") { exit 0 }
