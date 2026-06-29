@@ -9,8 +9,8 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-# Base de datos aislada por test file
-os.environ["MINUTAS_DB_PATH"] = tempfile.mktemp(suffix=".db")
+# Base de datos aislada por test (se redefine en setUp)
+os.environ.setdefault("MINUTAS_DB_PATH", tempfile.mktemp(suffix=".db"))
 
 import repo  # noqa: E402
 from main import app  # noqa: E402
@@ -18,10 +18,19 @@ from main import app  # noqa: E402
 
 class MinutasApiTests(unittest.TestCase):
     def setUp(self) -> None:
-        if os.path.exists(repo.DB_PATH):
-            os.remove(repo.DB_PATH)
+        self._db_path = tempfile.mktemp(suffix=".db")
+        os.environ["MINUTAS_DB_PATH"] = self._db_path
+        repo.DB_PATH = self._db_path
         repo.init_db()
         self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        self.client.close()
+        if os.path.exists(self._db_path):
+            try:
+                os.remove(self._db_path)
+            except OSError:
+                pass
 
     def test_flujo_reunion_completo(self) -> None:
         r = self.client.post("/sesiones/iniciar", json={"responsable": "Jefe Pañol"})

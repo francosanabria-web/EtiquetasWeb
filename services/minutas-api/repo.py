@@ -203,7 +203,7 @@ def _actualizaciones_solicitud(
 
 
 def _solicitud_completa(conn: sqlite3.Connection, row: sqlite3.Row, sesion_id: int) -> Solicitud:
-    entregas = _entregas_parciales(conn, row["id"])
+    entregas = _entregas_por_solicitud(conn, row["id"])
     actualizaciones = _actualizaciones_solicitud(conn, sesion_id, row["id"])
     return Solicitud(
         id=row["id"],
