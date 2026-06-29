@@ -1,10 +1,9 @@
 import type { CatalogoItem, NuevaEtiqueta, Pedido, PedidoCreado } from "./types";
 
-// URL base de la API.
-// - Desarrollo LAN: VITE_API_URL en .env.local (ej. http://10.1.102.8:8010)
-// - Vercel producción: por defecto /api (proxy serverless → ETIQUETAS_API_ORIGIN)
-const _default = import.meta.env.PROD ? "/api" : "http://localhost:8010";
-export const API_URL = (import.meta.env.VITE_API_URL ?? _default).replace(/\/$/, "");
+// URL base de la API (solo LAN / localhost). Configurar en .env.local en la PC servidor.
+export const API_URL = (
+  import.meta.env.VITE_API_URL ?? "http://localhost:8010"
+).replace(/\/$/, "");
 
 export class ApiError extends Error {
   status: number;

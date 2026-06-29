@@ -1,45 +1,39 @@
 # etiquetas-web
 
 Frontend (Vite + React + TypeScript) para encolar etiquetas en `etiquetas-api`.
-Es la "cara" que usa el personal del pañol; manda los pedidos a la API y muestra
-la cola pendiente en vivo.
+Solo se usa en la **red local del pañol** (localhost o IP de la PC impresora).
 
-## Modos
+## Acceso
 
-- **Código**: se busca un código en el catálogo (`GET /catalogo/{codigo}`) y se
-  envía una etiqueta con código + descripción + ubicación + QR.
-- **Rótulo simple**: solo texto libre.
+| Desde | URL |
+|-------|-----|
+| Misma PC | http://localhost:5173 |
+| Otras PCs del pañol | http://IP-PC-IMPRESORA:5173 (ej. http://10.1.102.8:5173) |
+
+Requisito: supervisor activo en la PC impresora (`scripts/instalar_autostart.ps1`).
+Ver `COMO_IMPRIMIR.txt` en la raíz del repo.
 
 ## Configuración
 
-La URL de la API se define con la variable `VITE_API_URL` (por defecto
-`http://localhost:8000`). Para usar desde tablets/otras PCs apuntando a la PC
-servidor, crear un archivo `.env.local`:
+Crear `services/etiquetas-web/.env.local` en la PC servidor:
 
 ```
-VITE_API_URL=http://192.168.1.50:8000
+VITE_API_URL=http://10.1.102.8:8010
 ```
 
-.env.local
+Reiniciar `npm run dev` (o el supervisor) después de cambiar la IP.
 
-## Vercel (proyecto separado)
+## Modos
 
-Root Directory en Vercel: **`services/etiquetas-web`**
-
-| Variable | Dónde | Valor |
-|----------|--------|--------|
-| `ETIQUETAS_API_ORIGIN` | Vercel → Settings → Env (server) | URL HTTPS de `etiquetas-api` (túnel o hosting) |
-| `VITE_API_URL` | Opcional | Dejar vacío en prod → usa `/api` (proxy) |
-
-El proxy en `api/[...path].ts` evita mixed-content (HTTPS Vercel → HTTP LAN).
+- **Código**: catálogo en caché local (`GET /catalogo/{codigo}`).
+- **Rótulo simple**: texto libre con tamaño de letra ajustable.
 
 ## Desarrollo
 
 ```bash
 npm install
-npm run dev          # local (http://localhost:5173)
-npm run dev:lan      # accesible desde la red local
+npm run dev          # http://localhost:5173
+npm run dev:lan      # accesible desde otras PCs (0.0.0.0:5173)
 ```
 
-> Para que el navegador pueda llamar a la API desde otro origen, `etiquetas-api`
-> tiene CORS habilitado (configurable con `ETIQUETAS_CORS_ORIGINS`).
+La API tiene CORS habilitado (`ETIQUETAS_CORS_ORIGINS` en etiquetas-api).

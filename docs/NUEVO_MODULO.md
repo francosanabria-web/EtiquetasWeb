@@ -1,30 +1,31 @@
-# Checklist — nuevo módulo web (misma lógica que etiquetas)
+# Checklist — nuevo módulo (misma lógica que etiquetas)
 
-Copiá este flujo para cada módulo nuevo del día.
+Copiá este flujo para cada módulo nuevo del pañol.
 
 ## 1. Estructura en el monorepo
 
 ```
-services/<nombre>-web/          ← frontend Vite + React (Vercel)
+services/<nombre>-web/          ← frontend Vite + React (LAN si es uso interno)
 services/<nombre>-api/          ← opcional: FastAPI si necesita backend propio
 ```
 
-Referencia: copiar patrón de `services/etiquetas-web/`.
+Referencia: `services/etiquetas-web/` + `services/etiquetas-api/`.
 
 Archivos mínimos frontend:
 
 - `package.json`, `vite.config.ts`, `tsconfig.json`, `index.html`
-- `vercel.json` (framework vite, output dist, SPA rewrite)
 - `.env.example` + `.gitignore` (incluir `.env.local`)
 - `src/` (App, api.ts, types)
+
+Solo agregar `vercel.json` si el módulo **debe** publicarse en internet (ej. portal público). Etiquetas y la mayoría del pañol: **solo LAN**.
 
 ## 2. Desarrollo local
 
 ```powershell
 cd services\<nombre>-web
 npm install
-copy .env.example .env.local   # editar URLs
-npm run dev
+copy .env.example .env.local   # editar URLs (IP LAN)
+npm run dev:lan                # accesible desde otras PCs
 ```
 
 Backend (si aplica): tests con `python -m unittest` en la carpeta del API.
@@ -42,41 +43,33 @@ git commit -m "feat(<nombre>): módulo inicial"
 git push -u origin feature/<nombre-modulo>
 ```
 
-Merge a `main` cuando esté probado → ver `docs/FLUJO_DESARROLLO.md`.
+Merge a `main` cuando esté probado → `docs/FLUJO_DESARROLLO.md`.
 
-## 4. Vercel (proyecto SEPARADO por módulo)
+## 4. Despliegue
 
-En [vercel.com/new](https://vercel.com/new):
+| Tipo | Dónde | Cómo |
+|------|-------|------|
+| **Uso interno pañol** (etiquetas, salidas, etc.) | PC servidor o LAN | Supervisor / `npm run dev:lan` + API local |
+| **App pública** (shell, móvil) | Vercel u otro hosting | Proyecto aparte; ver README del módulo |
 
-| Campo | Valor |
-|-------|--------|
-| Repository | `francosanabria-web/EtiquetasWeb` (mismo monorepo) |
-| **Root Directory** | `services/<nombre>-web` |
-| Project name | distinto por módulo (ej. `salidas-panol`) |
-
-Variables de entorno: según módulo (patrón proxy `/api` + `*_API_ORIGIN` en servidor si hay backend LAN).
+Etiquetas: **no Vercel**. Acceso vía `http://IP-PC:5173` con supervisor en la PC impresora.
 
 ## 5. Etiquetas — estado actual (referencia)
 
 | Pieza | Estado |
 |-------|--------|
-| GitHub `main` | ✅ Sincronizado |
-| Vercel frontend | ✅ URL pública |
-| LAN (supervisor) | ✅ Impresión local |
-| `ETIQUETAS_API_ORIGIN` en Vercel | ⏳ Opcional: solo si querés catálogo/impresión **desde la URL Vercel fuera de LAN** |
-
-Sin `ETIQUETAS_API_ORIGIN`: la web en Vercel carga, pero `/api` responde 503 hasta configurar túnel HTTPS a la PC.
+| GitHub `main` | Código fuente |
+| LAN supervisor | API :8010, web :5173, print-agent |
+| Acceso | localhost o IP PC impresora (ej. 10.1.102.8) |
 
 ## 6. Tests antes de merge
 
 ```powershell
-# API etiquetas (ejemplo)
 cd services\etiquetas-api
 .\.venv\Scripts\python.exe -m unittest test_etiquetas test_catalogo_cache -v
 
-# Build frontend
 cd ..\etiquetas-web
 npm run build
 ```
 
-CI en GitHub corre tests del API en cada push a `main` (`.github/workflows/ci.yml`).
+CI en GitHub: `.github/workflows/ci.yml` (tests API en push a `main`).

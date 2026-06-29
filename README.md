@@ -1,53 +1,39 @@
 # AppWebSalidas — Sistema integrado de pañol
 
-Monorepo del ecosistema de aplicaciones de pañol. Cada módulo es independiente
-pero comparte este repositorio y despliega por separado.
+Monorepo en GitHub: desarrollo, pruebas locales y push cuando esté estable.
+Repo: https://github.com/francosanabria-web/EtiquetasWeb
 
 ## Arquitectura
 
 ```
-AppWebSalidas/                    ← este repo (GitHub)
+AppWebSalidas/
 ├── apps/
-│   └── web/                      → Vercel: portal / login / shell (futuro)
+│   └── web/                      → shell / login (futuro; Vercel si aplica)
 ├── services/
-│   ├── etiquetas-web/            → Vercel: app de etiquetas (separada)
-│   ├── etiquetas-api/            → PC impresora (LAN): cola + catálogo
-│   └── print-agent/              → PC impresora (LAN): impresión física
+│   ├── etiquetas-web/            → LAN: localhost + IP PC impresora :5173
+│   ├── etiquetas-api/            → LAN: PC impresora :8010
+│   └── print-agent/              → LAN: PC impresora (impresión)
 └── scripts/                      → supervisor, monitoreo
 ```
 
-| App | Dónde corre | Vercel |
-|-----|-------------|--------|
-| App móvil pañol (`AppPanolWeb`) | Repo / proyecto **propio** | Ya desplegada |
-| **Etiquetas web** | `services/etiquetas-web` | **Proyecto Vercel aparte** |
-| Shell principal | `apps/web` | Proyecto futuro |
-| API + impresión | PC de la impresora | No va a Vercel |
+| Módulo | Dónde corre | Internet |
+|--------|-------------|----------|
+| **Etiquetas** | Red local del pañol | No |
+| App móvil pañol | Proyecto / repo propio | Vercel (ya existente) |
+| Shell (`apps/web`) | Futuro | A definir |
 
-## Despliegue — Etiquetas en Vercel
+## Etiquetas — uso diario
 
-1. Conectar este repo a GitHub (`scripts/setup_github.ps1`).
-2. En Vercel: **Add Project** → importar repo.
-3. **Root Directory:** `services/etiquetas-web`
-4. Variable **Production:** `ETIQUETAS_API_ORIGIN` = URL HTTPS pública de `etiquetas-api`.
-5. Deploy.
+1. PC impresora: supervisor (`scripts/instalar_autostart.ps1`).
+2. Cualquier PC del pañol: navegador → `http://IP-PC:5173`.
 
-La PC impresora sigue con el supervisor (`scripts/instalar_autostart.ps1`).
-Para Vercel desde internet, exponé el puerto 8010 con túnel HTTPS.
+Detalle: `COMO_IMPRIMIR.txt`
 
-### Etiquetas en Vercel — checklist final
+## Git — cambios seguros
 
-| Paso | Estado |
-|------|--------|
-| Repo GitHub `EtiquetasWeb` | Hecho |
-| Vercel → Root `services/etiquetas-web` | Hecho |
-| URL pública carga la UI | Hecho |
-| Impresión / catálogo desde **LAN** (`10.1.102.8:5173` + supervisor) | Sigue igual |
-| `ETIQUETAS_API_ORIGIN` en Vercel (HTTPS → PC) | Pendiente solo si querés usar la **URL Vercel** fuera de la red local |
+- Trabajar en ramas `feature/...`, probar local, merge a `main`, `git push`.
+- Guía: `docs/FLUJO_DESARROLLO.md`
 
-## Documentación
+## Módulos nuevos
 
-- `docs/FLUJO_DESARROLLO.md` — ramas, stash, probar sin commitear
-- `docs/NUEVO_MODULO.md` — checklist para módulos nuevos (dev → git → Vercel)
-- `COMO_IMPRIMIR.txt` — operación diaria LAN
-
-Ver READMEs en cada servicio.
+Checklist: `docs/NUEVO_MODULO.md`
