@@ -20,6 +20,19 @@ servidor, crear un archivo `.env.local`:
 VITE_API_URL=http://192.168.1.50:8000
 ```
 
+.env.local
+
+## Vercel (proyecto separado)
+
+Root Directory en Vercel: **`services/etiquetas-web`**
+
+| Variable | Dónde | Valor |
+|----------|--------|--------|
+| `ETIQUETAS_API_ORIGIN` | Vercel → Settings → Env (server) | URL HTTPS de `etiquetas-api` (túnel o hosting) |
+| `VITE_API_URL` | Opcional | Dejar vacío en prod → usa `/api` (proxy) |
+
+El proxy en `api/[...path].ts` evita mixed-content (HTTPS Vercel → HTTP LAN).
+
 ## Desarrollo
 
 ```bash
