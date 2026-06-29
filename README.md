@@ -34,4 +34,20 @@ AppWebSalidas/                    ← este repo (GitHub)
 La PC impresora sigue con el supervisor (`scripts/instalar_autostart.ps1`).
 Para Vercel desde internet, exponé el puerto 8010 con túnel HTTPS.
 
-Ver `COMO_IMPRIMIR.txt` y READMEs en cada servicio.
+### Etiquetas en Vercel — checklist final
+
+| Paso | Estado |
+|------|--------|
+| Repo GitHub `EtiquetasWeb` | Hecho |
+| Vercel → Root `services/etiquetas-web` | Hecho |
+| URL pública carga la UI | Hecho |
+| Impresión / catálogo desde **LAN** (`10.1.102.8:5173` + supervisor) | Sigue igual |
+| `ETIQUETAS_API_ORIGIN` en Vercel (HTTPS → PC) | Pendiente solo si querés usar la **URL Vercel** fuera de la red local |
+
+## Documentación
+
+- `docs/FLUJO_DESARROLLO.md` — ramas, stash, probar sin commitear
+- `docs/NUEVO_MODULO.md` — checklist para módulos nuevos (dev → git → Vercel)
+- `COMO_IMPRIMIR.txt` — operación diaria LAN
+
+Ver READMEs en cada servicio.
