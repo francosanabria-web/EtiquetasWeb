@@ -18,3 +18,16 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - run: python -m unittest test_etiquetas -v
+
+  minutas-api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/minutas-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt httpx
+      - run: python -m unittest test_minutas -v

@@ -12,6 +12,8 @@ AppWebSalidas/
 ├── services/
 │   ├── etiquetas-web/            → LAN: localhost + IP PC impresora :5173
 │   ├── etiquetas-api/            → LAN: PC impresora :8010
+│   ├── minutas-web/              → LAN: minutas reunión compras :5175
+│   ├── minutas-api/              → LAN: persistencia + mail :8012
 │   └── print-agent/              → LAN: PC impresora (impresión)
 └── scripts/                      → supervisor, monitoreo
 ```
@@ -19,6 +21,7 @@ AppWebSalidas/
 | Módulo | Dónde corre | Internet |
 |--------|-------------|----------|
 | **Etiquetas** | Red local del pañol | No |
+| **Minutas** | Red local (reunión compras) | No |
 | App móvil pañol | Proyecto / repo propio | Vercel (ya existente) |
 | Shell (`apps/web`) | Futuro | A definir |
 

@@ -1,4 +1,4 @@
-export type Rol = "admin" | "panolero" | "consulta";
+export type Rol = "admin" | "panolero" | "consulta" | "jefatura";
 
 export type Usuario = {
   id: string;
@@ -7,7 +7,7 @@ export type Usuario = {
   rol: Rol;
 };
 
-export type ModuloId = "etiquetas" | "panol" | "salidas" | "inventario";
+export type ModuloId = "etiquetas" | "minutas" | "panol" | "salidas" | "inventario";
 
 export type ModuloDef = {
   id: ModuloId;
@@ -31,6 +31,16 @@ export const MODULOS: ModuloDef[] = [
     ruta: import.meta.env.VITE_ETIQUETAS_URL ?? "http://localhost:5173",
     externo: true,
     roles: ["admin", "panolero"],
+    disponible: true,
+  },
+  {
+    id: "minutas",
+    titulo: "Minutas — Compras",
+    descripcion: "Reunión semanal: seguimiento de pedidos, entregas parciales y envío por mail.",
+    icono: "📝",
+    ruta: import.meta.env.VITE_MINUTAS_URL ?? "http://localhost:5175",
+    externo: true,
+    roles: ["admin", "jefatura", "panolero"],
     disponible: true,
   },
   {
