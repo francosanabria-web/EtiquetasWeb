@@ -9,6 +9,7 @@ env/
 # Base de datos local de la cola de impresión (no se versiona)
 *.db
 cola.db
+catalogo_cache.db
 *.db-wal
 *.db-shm
 

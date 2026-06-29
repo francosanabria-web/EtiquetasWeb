@@ -1,37 +1,48 @@
 # -*- coding: utf-8 -*-
 """
-firebase_lectura.py — Lectura del catálogo desde Firebase Firestore.
+firebase_lectura.py — Catálogo Firestore SOLO LECTURA vía listener + caché.
 
-⚠️ SOLO LECTURA. Este módulo NUNCA debe escribir, actualizar ni borrar nada en
-Firestore. No hay (ni debe haber) funciones que llamen a .set(), .update(),
-.add() o .delete() sobre las colecciones de catálogo/stock. Si en el futuro
-hiciera falta escribir, hay que DETENERSE y avisar: no es parte de este servicio.
+Estrategia (mínimas lecturas):
+  1. Tras las 08:00 (hora local), UNA sincronización con on_snapshot al día.
+  2. El listener sigue activo: solo consume lecturas si cambia un documento
+     (p. ej. carga de alias); el stock no cambia en jornada.
+  3. Si la API se reinicia el mismo día, carga SQLite → 0 lecturas Firestore.
+  4. GET /catalogo/{codigo} NUNCA llama a get() ni where(): solo memoria.
 
-Los nombres de colección y de campos del catálogo TODAVÍA NO están confirmados
-contra el proyecto real de la app móvil. Se dejan como constantes editables acá
-arriba para ajustarlos en otra tarea sin tocar el resto del código.
+⚠️ NUNCA escribir en Firestore desde este módulo.
 """
 
 from __future__ import annotations
 
 import os
+import threading
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-# ----------------------------------------------------------------------------
-# CONFIGURACIÓN EDITABLE (sin confirmar — ajustar cuando se valide con la app real)
-# ----------------------------------------------------------------------------
-COLECCION_CATALOGO = "articulos"   # nombre de la colección de artículos
-CAMPO_CODIGO = "codigo"            # campo que guarda el código del artículo
-CAMPO_DESCRIPCION = "desc"         # campo de la descripción
-CAMPO_UBICACION = "ubicacion"      # campo de la ubicación
+try:
+    from zoneinfo import ZoneInfo
 
-# Caché en memoria para no agotar la cuota diaria de lecturas de Firestore.
-# TTL en segundos (por defecto 10 min). 0 = desactivar caché.
-CACHE_TTL_SEG = int(os.environ.get("ETIQUETAS_CACHE_TTL", "600"))
+    def _tz_local():
+        key = os.environ.get("ETIQUETAS_TZ", "America/Argentina/Buenos_Aires")
+        try:
+            return ZoneInfo(key)
+        except Exception:
+            return timezone(timedelta(hours=-3))
+except ImportError:
+    def _tz_local():
+        return timezone(timedelta(hours=-3))
 
-# Ruta del archivo de credenciales de servicio (firebase-admin).
-# Se puede sobreescribir con la variable de entorno GOOGLE_APPLICATION_CREDENTIALS.
+import catalogo_cache
+
+COLECCION_CATALOGO = "articulos"
+CAMPO_CODIGO = "codigo"
+CAMPO_DESCRIPCION = "desc"
+CAMPO_UBICACION = "ubicacion"
+
+TZ = _tz_local()
+HORA_SYNC = int(os.environ.get("ETIQUETAS_SYNC_HORA", "8"))
+
 RUTA_CREDENCIALES = os.environ.get(
     "GOOGLE_APPLICATION_CREDENTIALS",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "serviceAccountKey.json"),
@@ -39,30 +50,98 @@ RUTA_CREDENCIALES = os.environ.get(
 
 
 class FirebaseNoConfigurado(RuntimeError):
-    """Se lanza cuando faltan credenciales o la librería firebase-admin."""
+    pass
 
 
 class FirebaseQuotaExcedida(RuntimeError):
-    """Firestore rechazó la lectura (429 / cuota diaria o rate limit)."""
+    pass
 
 
-_db = None  # cliente Firestore cacheado (se inicializa una sola vez)
-_cache: dict[str, tuple[float, Optional[dict[str, str]]]] = {}
+class CatalogoSincronizando(RuntimeError):
+    pass
 
 
-def inicializar_firebase() -> None:
-    """Conecta el cliente Firestore sin hacer lecturas (warmup seguro)."""
-    _get_db()
+class CatalogoNoDisponible(RuntimeError):
+    pass
+
+
+_db = None
+_lock = threading.Lock()
+_indice: dict[str, dict[str, str]] = {}
+_estado: str = "pendiente"
+_watch: Any = None
+_sync_thread_started = False
+
+
+def _ahora_local() -> datetime:
+    return datetime.now(TZ)
+
+
+def _doc_a_item(doc_id: str, data: dict[str, Any]) -> dict[str, str]:
+    codigo = str(data.get(CAMPO_CODIGO, doc_id) or doc_id)
+    return {
+        "codigo": codigo,
+        "descripcion": str(data.get(CAMPO_DESCRIPCION, "") or ""),
+        "ubicacion": str(data.get(CAMPO_UBICACION, "") or ""),
+    }
+
+
+def _claves_indice(doc_id: str, item: dict[str, str]) -> list[str]:
+    claves = {doc_id.strip().upper(), item["codigo"].strip().upper()}
+    return [c for c in claves if c]
+
+
+def _limpiar_doc_del_indice(doc_id: str) -> None:
+    for clave, val in list(_indice.items()):
+        if val.get("_doc_id") == doc_id:
+            del _indice[clave]
+
+
+def _indexar(doc_id: str, item: dict[str, str]) -> None:
+    item = {**item, "_doc_id": doc_id}
+    for clave in _claves_indice(doc_id, item):
+        _indice[clave] = item
+
+
+def _cargar_indice_desde_lista(items: list[dict[str, str]]) -> None:
+    _indice.clear()
+    for row in items:
+        item = {
+            "codigo": row["codigo"],
+            "descripcion": row["descripcion"],
+            "ubicacion": row["ubicacion"],
+        }
+        _indexar(row["doc_id"], item)
+
+
+def _cargar_desde_sqlite() -> bool:
+    global _estado
+    items = catalogo_cache.cargar_todos()
+    if not items:
+        return False
+    with _lock:
+        _cargar_indice_desde_lista(items)
+        _estado = "listo"
+    return True
+
+
+def _necesita_sync_firestore(ultima: Optional[datetime]) -> bool:
+    """
+    Como máximo una sync Firestore por día calendario, a partir de HORA_SYNC.
+    Excepción: si no hay caché local (primer arranque), sync de bootstrap.
+    """
+    if not catalogo_cache.tiene_datos():
+        return True
+    ahora = _ahora_local()
+    if ahora.hour < HORA_SYNC:
+        return False
+    if ultima is None:
+        return True
+    ultima_local = ultima.astimezone(TZ) if ultima.tzinfo else ultima.replace(tzinfo=TZ)
+    return ahora.date() > ultima_local.date()
 
 
 def _get_db():
-    """
-    Inicializa firebase-admin una sola vez y devuelve el cliente Firestore.
-
-    El import de firebase_admin es perezoso a propósito: así el resto del
-    servicio (la cola SQLite) funciona aunque la librería no esté instalada o
-    falten credenciales.
-    """
     global _db
     if _db is not None:
         return _db
@@ -70,15 +149,14 @@ def _get_db():
     try:
         import firebase_admin
         from firebase_admin import credentials, firestore
-    except ImportError as exc:  # firebase-admin no instalado
+    except ImportError as exc:
         raise FirebaseNoConfigurado(
             "Falta la librería 'firebase-admin'. Instalá las dependencias del servicio."
         ) from exc
 
     if not os.path.exists(RUTA_CREDENCIALES):
         raise FirebaseNoConfigurado(
-            f"No se encontró el archivo de credenciales en '{RUTA_CREDENCIALES}'. "
-            "Configurá GOOGLE_APPLICATION_CREDENTIALS o dejá serviceAccountKey.json."
+            f"No se encontró el archivo de credenciales en '{RUTA_CREDENCIALES}'."
         )
 
     if not firebase_admin._apps:
@@ -88,99 +166,194 @@ def _get_db():
     return _db
 
 
-def _doc_a_item(codigo_consultado: str, data: dict[str, Any]) -> dict[str, str]:
-    """Mapea un documento de Firestore al formato de salida del servicio."""
-    return {
-        "codigo": str(data.get(CAMPO_CODIGO, codigo_consultado) or codigo_consultado),
-        "descripcion": str(data.get(CAMPO_DESCRIPCION, "") or ""),
-        "ubicacion": str(data.get(CAMPO_UBICACION, "") or ""),
-    }
+def _on_snapshot(col_snapshot, changes, read_time) -> None:
+    global _estado
+    from google.api_core import exceptions as gax
+
+    if not changes:
+        return
+
+    try:
+        upserts: list[tuple[str, dict[str, str]]] = []
+        deletes: list[str] = []
+
+        for change in changes:
+            doc = change.document
+            doc_id = doc.id
+            if change.type.name in ("ADDED", "MODIFIED"):
+                upserts.append((doc_id, _doc_a_item(doc_id, doc.to_dict() or {})))
+            elif change.type.name == "REMOVED":
+                deletes.append(doc_id)
+
+        with _lock:
+            for doc_id, item in upserts:
+                _limpiar_doc_del_indice(doc_id)
+                _indexar(doc_id, item)
+            for doc_id in deletes:
+                _limpiar_doc_del_indice(doc_id)
+            _estado = "listo"
+
+        for doc_id, item in upserts:
+            catalogo_cache.upsert_item(
+                doc_id, item["codigo"], item["descripcion"], item["ubicacion"]
+            )
+        for doc_id in deletes:
+            catalogo_cache.eliminar_item(doc_id)
+
+        catalogo_cache.marcar_sync(_ahora_local())
+    except gax.ResourceExhausted as exc:
+        raise FirebaseQuotaExcedida(
+            "Cuota de lecturas de Firebase agotada. Las etiquetas simples siguen funcionando."
+        ) from exc
+
+
+def _detener_listener() -> None:
+    global _watch
+    if _watch is not None:
+        try:
+            _watch.unsubscribe()
+        except Exception:
+            pass
+        _watch = None
+
+
+def _iniciar_listener() -> None:
+    global _estado, _watch
+    _detener_listener()
+    db = _get_db()
+    col = db.collection(COLECCION_CATALOGO)
+    with _lock:
+        _estado = "sincronizando"
+    _watch = col.on_snapshot(_on_snapshot)
+
+
+def _intentar_cargar_o_sincronizar() -> None:
+    global _estado
+
+    if not os.path.exists(RUTA_CREDENCIALES):
+        if _cargar_desde_sqlite():
+            return
+        with _lock:
+            _estado = "sin_credenciales"
+        return
+
+    ultima = catalogo_cache.obtener_ultima_sync()
+    if catalogo_cache.tiene_datos() and ultima is None:
+        catalogo_cache.marcar_sync(_ahora_local())
+        ultima = catalogo_cache.obtener_ultima_sync()
+
+    if not _necesita_sync_firestore(ultima):
+        if _cargar_desde_sqlite():
+            return
+        ahora = _ahora_local()
+        if ahora.hour < HORA_SYNC:
+            with _lock:
+                _estado = "pendiente"
+            return
+        # Pasó la hora pero no hay SQLite (primer arranque del día).
+        _iniciar_listener()
+        return
+
+    _iniciar_listener()
+
+
+def _loop_sincronizacion() -> None:
+    global _estado, _sync_thread_started
+
+    try:
+        catalogo_cache.init_db()
+        _intentar_cargar_o_sincronizar()
+    except FirebaseNoConfigurado:
+        if not _cargar_desde_sqlite():
+            with _lock:
+                _estado = "sin_credenciales"
+    except FirebaseQuotaExcedida:
+        if _cargar_desde_sqlite():
+            with _lock:
+                _estado = "listo"
+        else:
+            with _lock:
+                _estado = "cuota_excedida"
+    except Exception:
+        if not _cargar_desde_sqlite():
+            with _lock:
+                _estado = "error"
+
+    while True:
+        time.sleep(1800)
+        try:
+            if _necesita_sync_firestore(catalogo_cache.obtener_ultima_sync()):
+                _iniciar_listener()
+            elif _estado == "pendiente" and _ahora_local().hour >= HORA_SYNC:
+                _intentar_cargar_o_sincronizar()
+        except Exception:
+            pass
+
+
+def iniciar_sincronizacion_catalogo() -> None:
+    global _sync_thread_started
+    if _sync_thread_started:
+        return
+    _sync_thread_started = True
+    threading.Thread(target=_loop_sincronizacion, daemon=True, name="catalogo-sync").start()
+
+
+def inicializar_firebase() -> None:
+    iniciar_sincronizacion_catalogo()
+
+
+def estado_catalogo() -> dict[str, Any]:
+    ultima = catalogo_cache.obtener_ultima_sync()
+    with _lock:
+        return {
+            "estado": _estado,
+            "articulos_indexados": len(_indice),
+            "ultima_sync": ultima.isoformat() if ultima else None,
+            "hora_sync_configurada": HORA_SYNC,
+            "zona_horaria": str(TZ),
+        }
 
 
 def _variantes(codigo: str) -> list[str]:
-    """Máximo 2 variantes (mayúsculas primero) para minimizar lecturas."""
     base = codigo.strip()
     upper = base.upper()
-    vistos: list[str] = []
+    out: list[str] = []
     for c in (upper, base):
-        if c and c not in vistos:
-            vistos.append(c)
-    return vistos
+        if c and c not in out:
+            out.append(c)
+    return out
 
 
-def _leer_cache(clave: str) -> Optional[dict[str, str]] | object:
-    """Devuelve el item cacheado, None si no está, o _SIN_CACHE si TTL=0."""
-    if CACHE_TTL_SEG <= 0:
-        return _SIN_CACHE
-    entry = _cache.get(clave)
-    if not entry:
-        return _SIN_CACHE
-    expira, valor = entry
-    if time.time() >= expira:
-        del _cache[clave]
-        return _SIN_CACHE
-    return valor
-
-
-_SIN_CACHE = object()
-
-
-def _guardar_cache(clave: str, valor: Optional[dict[str, str]]) -> None:
-    if CACHE_TTL_SEG <= 0:
-        return
-    _cache[clave] = (time.time() + CACHE_TTL_SEG, valor)
-
-
-def _buscar_variante(col, variante: str) -> Optional[dict[str, str]]:
-    """Una variante: primero doc por id (1 lectura); query solo si no existe."""
-    from firebase_admin import firestore
-    from google.api_core import exceptions as gax
-
-    try:
-        doc = col.document(variante).get()
-        if doc.exists:
-            return _doc_a_item(variante, doc.to_dict() or {})
-
-        consulta = (
-            col.where(filter=firestore.FieldFilter(CAMPO_CODIGO, "==", variante))
-            .limit(1)
-            .stream()
-        )
-        for encontrado in consulta:
-            return _doc_a_item(variante, encontrado.to_dict() or {})
-    except gax.ResourceExhausted as exc:
-        raise FirebaseQuotaExcedida(
-            "Cuota de lecturas de Firebase agotada temporalmente. "
-            "Esperá unos minutos o revisá el plan de Firestore. "
-            "Las etiquetas simples siguen funcionando."
-        ) from exc
-
-    return None
+def _item_publico(item: dict[str, str]) -> dict[str, str]:
+    return {k: v for k, v in item.items() if not k.startswith("_")}
 
 
 def buscar_catalogo(codigo: str) -> Optional[dict[str, str]]:
-    """
-    Busca un código en el catálogo (SOLO LECTURA).
-
-    Usa caché en memoria y pocas lecturas por búsqueda (doc id primero).
-    """
+    """Busca SOLO en caché en memoria (0 lecturas Firestore por request)."""
     codigo = str(codigo).strip()
     if not codigo:
         return None
 
-    clave_cache = codigo.upper()
-    cached = _leer_cache(clave_cache)
-    if cached is not _SIN_CACHE:
-        return cached
+    with _lock:
+        estado = _estado
+        if estado == "sincronizando" and not _indice:
+            raise CatalogoSincronizando(
+                "El catálogo se está sincronizando. Reintentá en unos segundos."
+            )
+        if estado == "pendiente" and not _indice:
+            raise CatalogoSincronizando(
+                f"El catálogo se sincroniza a partir de las {HORA_SYNC}:00."
+            )
+        if estado == "cuota_excedida" and not _indice:
+            raise FirebaseQuotaExcedida(
+                "Cuota de Firebase agotada y sin caché local disponible."
+            )
+        if estado in ("sin_credenciales", "error") and not _indice:
+            raise CatalogoNoDisponible("Catálogo no disponible.")
 
-    db = _get_db()
-    col = db.collection(COLECCION_CATALOGO)
+        for variante in _variantes(codigo):
+            item = _indice.get(variante.upper())
+            if item:
+                return _item_publico(item)
 
-    resultado: Optional[dict[str, str]] = None
-    for variante in _variantes(codigo):
-        resultado = _buscar_variante(col, variante)
-        if resultado is not None:
-            break
-
-    _guardar_cache(clave_cache, resultado)
-    return resultado
+    return None

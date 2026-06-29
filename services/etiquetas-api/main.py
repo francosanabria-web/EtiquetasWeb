@@ -24,10 +24,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import cola_repo
 from firebase_lectura import (
+    CatalogoNoDisponible,
+    CatalogoSincronizando,
     FirebaseNoConfigurado,
     FirebaseQuotaExcedida,
     buscar_catalogo,
-    inicializar_firebase,
+    estado_catalogo,
+    iniciar_sincronizacion_catalogo,
 )
 from models import (
     CatalogoItem,
@@ -38,20 +41,17 @@ from models import (
 )
 
 
-def _precalentar_firebase() -> None:
-    """Conecta Firebase sin lecturas (evita gastar cuota al arrancar)."""
+def _arrancar_catalogo() -> None:
     try:
-        inicializar_firebase()
+        iniciar_sincronizacion_catalogo()
     except Exception:
         pass
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Asegura que la tabla de la cola exista al arrancar.
     cola_repo.init_db()
-    # Calienta Firebase sin bloquear el arranque del servidor.
-    threading.Thread(target=_precalentar_firebase, daemon=True).start()
+    threading.Thread(target=_arrancar_catalogo, daemon=True).start()
     yield
 
 
@@ -81,9 +81,15 @@ def health() -> dict[str, str]:
     return {"estado": "ok", "servicio": "etiquetas-api"}
 
 
+@app.get("/catalogo/estado", tags=["catalogo"])
+def get_catalogo_estado() -> dict:
+    """Estado de la caché del catálogo (sync, cantidad indexada)."""
+    return estado_catalogo()
+
+
 @app.get("/catalogo/{codigo}", response_model=CatalogoItem, tags=["catalogo"])
 def get_catalogo(codigo: str) -> CatalogoItem:
-    """Resuelve un código contra el catálogo de Firestore (solo lectura)."""
+    """Resuelve un código contra la caché local del catálogo (sin get() por request)."""
     try:
         item = buscar_catalogo(codigo)
     except FirebaseNoConfigurado as exc:
@@ -91,6 +97,14 @@ def get_catalogo(codigo: str) -> CatalogoItem:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
     except FirebaseQuotaExcedida as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    except CatalogoSincronizando as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    except CatalogoNoDisponible as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc

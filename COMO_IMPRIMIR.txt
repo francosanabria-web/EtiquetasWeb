@@ -120,6 +120,9 @@ py print_agent_api.py --diagnostico
   * "Cuota de lecturas de Firebase agotada" al buscar codigos -> la API
         responde pero Firestore rechazo lecturas (429). Las etiquetas SIMPLES
         siguen funcionando. Esperar unos minutos (a veces hasta 1 h) o revisar
-        cuota en console.firebase.google.com. La API ahora usa cache para
-        reducir lecturas repetidas.
+        cuota en console.firebase.google.com.
+
+  * El catalogo se sincroniza 1 vez al dia (despues de las 08:00). Las busquedas
+        usan cache local: 0 lecturas Firestore por codigo. Estado:
+        http://10.1.102.8:8010/catalogo/estado
 ==================================================================
