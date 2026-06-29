@@ -1,4 +1,4 @@
-export type Rol = "admin" | "panolero" | "consulta";
+export type Rol = "admin" | "panolero" | "consulta" | "jefatura" | "gerencia";
 
 export type Usuario = {
   id: string;
@@ -7,7 +7,7 @@ export type Usuario = {
   rol: Rol;
 };
 
-export type ModuloId = "etiquetas" | "panol" | "salidas" | "inventario";
+export type ModuloId = "etiquetas" | "kpis" | "panol" | "salidas" | "inventario";
 
 export type ModuloDef = {
   id: ModuloId;
@@ -31,6 +31,16 @@ export const MODULOS: ModuloDef[] = [
     ruta: import.meta.env.VITE_ETIQUETAS_URL ?? "http://localhost:5173",
     externo: true,
     roles: ["admin", "panolero"],
+    disponible: true,
+  },
+  {
+    id: "kpis",
+    titulo: "KPIs — Mantenimiento",
+    descripcion: "Importar planillas Excel y visualizar indicadores de gastos y líneas.",
+    icono: "📈",
+    ruta: import.meta.env.VITE_KPIS_URL ?? "http://localhost:5174",
+    externo: true,
+    roles: ["admin", "jefatura", "gerencia"],
     disponible: true,
   },
   {

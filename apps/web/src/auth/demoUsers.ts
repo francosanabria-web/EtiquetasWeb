@@ -26,6 +26,20 @@ export const USUARIOS_DEMO: Array<Usuario & { clave: string }> = [
     clave: "consulta123",
     rol: "consulta",
   },
+  {
+    id: "4",
+    nombre: "Jefatura Mantenimiento",
+    email: "jefatura@mant.local",
+    clave: "jefatura123",
+    rol: "jefatura",
+  },
+  {
+    id: "5",
+    nombre: "Gerencia Mantenimiento",
+    email: "gerencia@mant.local",
+    clave: "gerencia123",
+    rol: "gerencia",
+  },
 ];
 
 export function autenticarDemo(email: string, clave: string): Usuario | null {
@@ -46,5 +60,9 @@ export function etiquetaRol(rol: Rol): string {
       return "Pañolero";
     case "consulta":
       return "Solo consulta";
+    case "jefatura":
+      return "Jefatura";
+    case "gerencia":
+      return "Gerencia";
   }
 }
