@@ -1,108 +1,114 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-  agregarActualizacion,
-  agregarEntrega,
   actualizarSesion,
-  cerrarSolicitud,
-  crearSolicitud,
-  crearTema,
-  getSesion,
-  toggleTemaResuelto,
+  agregarNotaFila,
+  abandonarSesion,
   API_URL,
+  crearTema,
+  fijarSeleccionReunion,
+  getSesion,
+  importarExcel,
+  listarPedidos,
+  toggleTemaResuelto,
 } from "./api/client";
-import { ApiError } from "./api/client";
 import EnviarMinutaModal from "./components/EnviarMinutaModal";
 import HistorialPanel from "./components/HistorialPanel";
-import SolicitudCard from "./components/SolicitudCard";
-import SolicitudFormPanel from "./components/SolicitudFormPanel";
+import ImportExcelPanel from "./components/ImportExcelPanel";
+import PedidosReunionPanel from "./components/PedidosReunionPanel";
 import TemasPanel from "./components/TemasPanel";
 import { useMinutaSession } from "./hooks/useMinutaSession";
-import type { SesionDetalle, SolicitudForm, TemaForm } from "./types/minuta";
+import type { PedidoGrupo, SesionDetalle, TemaForm } from "./types/minuta";
 
 const SHELL_URL = import.meta.env.VITE_SHELL_URL;
 
 export default function App() {
-  const {
-    sesion,
-    setSesion,
-    historial,
-    cargando,
-    error,
-    setError,
-    apiOk,
-    refrescar,
-    iniciar,
-  } = useMinutaSession();
+  const { sesion, setSesion, historial, cargando, error, setError, apiOk, refrescar, iniciar } =
+    useMinutaSession();
 
-  const [responsable, setResponsable] = useState(
-    () => localStorage.getItem("minutas-responsable") ?? ""
+  const [operador, setOperador] = useState(
+    () => localStorage.getItem("minutas-operador") ?? localStorage.getItem("minutas-responsable") ?? ""
   );
   const [notas, setNotas] = useState("");
   const [modalEmail, setModalEmail] = useState(false);
   const [vistaHistorial, setVistaHistorial] = useState<SesionDetalle | null>(null);
   const [iniciando, setIniciando] = useState(false);
+  const [pedidos, setPedidos] = useState<PedidoGrupo[]>([]);
+  const [guardandoOperador, setGuardandoOperador] = useState(false);
 
   const activa = sesion?.estado === "abierta" ? sesion : null;
   const mostrar = vistaHistorial ?? activa;
   const readOnly = !activa || !!vistaHistorial;
 
-  const guardarNotas = useCallback(async () => {
-    if (!activa) return;
-    try {
-      await actualizarSesion(activa.id, { notas_generales: notas });
-      localStorage.setItem("minutas-responsable", responsable);
-      await refrescar();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Error al guardar notas.");
-    }
-  }, [activa, notas, responsable, refrescar, setError]);
+  const cargarPedidos = useCallback(async (id: number) => {
+    const lista = await listarPedidos(id, true);
+    setPedidos(lista);
+  }, []);
+
+  useEffect(() => {
+    if (activa) void cargarPedidos(activa.id);
+  }, [activa, cargarPedidos]);
 
   async function handleIniciar() {
     setIniciando(true);
-    localStorage.setItem("minutas-responsable", responsable);
-    await iniciar(responsable);
+    localStorage.setItem("minutas-operador", operador);
+    await iniciar(operador);
     setVistaHistorial(null);
     setIniciando(false);
+  }
+
+  async function guardarOperador() {
+    if (!activa) return;
+    const nombre = operador.trim();
+    localStorage.setItem("minutas-operador", nombre);
+    setGuardandoOperador(true);
+    try {
+      await actualizarSesion(activa.id, { responsable: nombre || undefined });
+      await refrescar();
+    } finally {
+      setGuardandoOperador(false);
+    }
   }
 
   async function reloadSesion(id: number) {
     const s = await getSesion(id);
     if (id === activa?.id) setSesion(s);
     else setVistaHistorial(s);
-  }
-
-  async function onNuevaSolicitud(form: SolicitudForm) {
-    if (!activa) return;
-    await crearSolicitud(activa.id, {
-      numero_referencia: form.numero_referencia.trim(),
-      solicitante: form.solicitante.trim(),
-      urgencia: form.urgencia,
-      cantidad_items: parseInt(form.cantidad_items, 10),
-      descripcion: form.descripcion.trim() || undefined,
-    });
-    await reloadSesion(activa.id);
-  }
-
-  if (cargando && !sesion && !vistaHistorial) {
-    return (
-      <div className="app-shell">
-        <p className="loading-center">Cargando minutas…</p>
-      </div>
-    );
+    await cargarPedidos(id);
   }
 
   return (
     <div className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-icon">📝</span>
+          <span className="brand-icon">📋</span>
           <div>
-            <h1>Minutas — Reunión semanal</h1>
-            <p className="brand-sub">Seguimiento de solicitudes a Compras · SistemasPañol</p>
+            <h1>Solicitudes de pedido — Pañol</h1>
+            <p className="brand-sub">
+              Reuniones, seguimiento de compras/mantenimiento y minutas · SistemasPañol
+            </p>
           </div>
         </div>
         <div className="top-meta">
           {!apiOk && <span className="badge warn">API desconectada</span>}
+          {activa && !readOnly && (
+            <label className="operador-top">
+              Pañolero
+              <input
+                value={operador}
+                onChange={(e) => setOperador(e.target.value)}
+                onBlur={() => void guardarOperador()}
+                placeholder="Tu nombre"
+              />
+              <button
+                type="button"
+                className="btn-sm btn-ghost"
+                disabled={guardandoOperador}
+                onClick={() => void guardarOperador()}
+              >
+                {guardandoOperador ? "…" : "Guardar"}
+              </button>
+            </label>
+          )}
           <span className="api-pill">API: {API_URL}</span>
         </div>
         {SHELL_URL && (
@@ -116,106 +122,123 @@ export default function App() {
         {error && (
           <div className="banner error">
             {error}
+            <button type="button" className="btn-sm btn-ghost" onClick={() => void refrescar()}>
+              Reintentar
+            </button>
             <button type="button" onClick={() => setError(null)} aria-label="Cerrar">
               ×
             </button>
           </div>
         )}
 
-        {!activa && !vistaHistorial && (
+        {cargando && !sesion && !vistaHistorial && (
           <section className="panel inicio">
-            <h2>Iniciar reunión de la semana</h2>
-            <p className="sub">
-              Se arrastran automáticamente las solicitudes abiertas y los temas pendientes de
-              reuniones anteriores.
-            </p>
-            <label>
-              Responsable de la minuta
-              <input
-                value={responsable}
-                onChange={(e) => setResponsable(e.target.value)}
-                placeholder="Nombre jefatura / pañol"
-              />
-            </label>
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={iniciando || !apiOk}
-              onClick={() => void handleIniciar()}
-            >
-              {iniciando ? "Iniciando…" : "Comenzar reunión"}
-            </button>
+            <p className="loading-inline">Cargando…</p>
           </section>
         )}
 
-        {vistaHistorial && (
-          <div className="banner info">
-            Viendo reunión {vistaHistorial.semana_iso} ({vistaHistorial.estado})
-            <button type="button" className="btn-sm btn-ghost" onClick={() => setVistaHistorial(null)}>
-              Volver a reunión actual
-            </button>
+        {!cargando && !activa && (
+          <div className="inicio-wrap">
+            <section className="panel inicio">
+              <h2>Iniciar reunión</h2>
+              <p className="sub">
+                Importá el Excel del día, elegí solicitudes a tratar, anotá cambios y cerrá con envío
+                de mail.
+              </p>
+              <label>
+                Tu nombre (pañolero — aparece en notas y mail)
+                <input value={operador} onChange={(e) => setOperador(e.target.value)} />
+              </label>
+              <button
+                type="button"
+                className="btn-primary btn-lg"
+                disabled={iniciando || !apiOk}
+                onClick={() => void handleIniciar()}
+              >
+                {iniciando ? "Iniciando…" : "Comenzar reunión"}
+              </button>
+            </section>
           </div>
         )}
 
         {mostrar && (
-          <div className="grid-main">
+          <div className="grid-main grid-main-wide">
             <div className="col-principal">
+              {vistaHistorial && (
+                <div className="banner info">
+                  Viendo reunión pasada ({vistaHistorial.semana_iso})
+                  <button
+                    type="button"
+                    className="btn-sm btn-ghost"
+                    onClick={() => setVistaHistorial(null)}
+                  >
+                    {activa ? "Volver a reunión actual" : "Volver"}
+                  </button>
+                </div>
+              )}
+
               <section className="panel sesion-head">
                 <div>
                   <h2>Semana {mostrar.semana_iso}</h2>
                   <p className="sub">
                     {mostrar.fecha}
                     {mostrar.responsable ? ` · ${mostrar.responsable}` : ""}
-                    {mostrar.email_enviado_en && " · Minuta enviada"}
                   </p>
                 </div>
-                {activa && !vistaHistorial && (
+                {activa && !readOnly && (
                   <div className="head-actions">
                     <button
                       type="button"
-                      className="btn-primary"
-                      onClick={() => setModalEmail(true)}
+                      className="btn-ghost btn-sm"
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            "¿Abandonar esta reunión sin enviar mail? Podrás comenzar una nueva."
+                          )
+                        ) {
+                          void abandonarSesion(activa.id).then(() => {
+                            setVistaHistorial(null);
+                            setPedidos([]);
+                            void refrescar();
+                          });
+                        }
+                      }}
                     >
-                      Finalizar y enviar mail
+                      Abandonar reunión
+                    </button>
+                    <button type="button" className="btn-primary" onClick={() => setModalEmail(true)}>
+                      Cerrar y enviar mail
                     </button>
                   </div>
                 )}
               </section>
 
-              {!readOnly && (
-                <SolicitudFormPanel onSubmit={onNuevaSolicitud} disabled={!apiOk} />
+              {!readOnly && activa && (
+                <>
+                  <ImportExcelPanel
+                    disabled={!apiOk}
+                    onImportar={(file) => importarExcel(activa.id, file)}
+                    onImportado={() => void cargarPedidos(activa.id)}
+                  />
+                  <PedidosReunionPanel
+                    sesionId={activa.id}
+                    pedidos={pedidos}
+                    operador={operador}
+                    readOnly={readOnly}
+                    onConfirmarSeleccion={async (refs) => {
+                      await fijarSeleccionReunion(activa.id, refs);
+                      await cargarPedidos(activa.id);
+                    }}
+                    onNota={async (filaId, texto) => {
+                      await agregarNotaFila(activa.id, filaId, {
+                        texto,
+                        autor: operador.trim() || undefined,
+                      });
+                      await cargarPedidos(activa.id);
+                    }}
+                  />
+                </>
               )}
-
-              <section className="panel">
-                <h3>Solicitudes ({mostrar.solicitudes.length})</h3>
-                <div className="sol-list">
-                  {mostrar.solicitudes.map((s) => (
-                    <SolicitudCard
-                      key={s.id}
-                      solicitud={s}
-                      sesionId={mostrar.id}
-                      autorDefault={responsable}
-                      readOnly={readOnly}
-                      onEntrega={async (sid, data) => {
-                        await agregarEntrega(mostrar.id, sid, data);
-                        await reloadSesion(mostrar.id);
-                      }}
-                      onActualizacion={async (sid, data) => {
-                        await agregarActualizacion(mostrar.id, sid, data);
-                        await reloadSesion(mostrar.id);
-                      }}
-                      onCerrar={async (sid) => {
-                        if (!confirm("¿Dar de baja el seguimiento de esta solicitud?")) return;
-                        await cerrarSolicitud(mostrar.id, sid);
-                        await reloadSesion(mostrar.id);
-                      }}
-                    />
-                  ))}
-                  {!mostrar.solicitudes.length && (
-                    <p className="muted">No hay solicitudes en seguimiento.</p>
-                  )}
-                </div>
-              </section>
 
               <TemasPanel
                 temas={mostrar.temas}
@@ -234,25 +257,25 @@ export default function App() {
                 }}
               />
 
-              {!readOnly && (
-                <section className="panel">
-                  <h3>Notas generales de la reunión</h3>
-                  <textarea
-                    rows={4}
-                    value={notas || mostrar.notas_generales || ""}
-                    onChange={(e) => setNotas(e.target.value)}
-                    placeholder="Acuerdos, observaciones, pendientes globales…"
-                  />
-                  <button type="button" className="btn-sm btn-ghost" onClick={() => void guardarNotas()}>
-                    Guardar notas
-                  </button>
-                </section>
-              )}
-
-              {readOnly && mostrar.notas_generales && (
+              {!readOnly && activa && (
                 <section className="panel">
                   <h3>Notas generales</h3>
-                  <p>{mostrar.notas_generales}</p>
+                  <textarea
+                    rows={3}
+                    value={notas || mostrar.notas_generales || ""}
+                    onChange={(e) => setNotas(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn-sm btn-ghost"
+                    onClick={() =>
+                      void actualizarSesion(activa.id, { notas_generales: notas }).then(() =>
+                        refrescar()
+                      )
+                    }
+                  >
+                    Guardar notas
+                  </button>
                 </section>
               )}
             </div>
@@ -276,8 +299,7 @@ export default function App() {
       )}
 
       <footer className="footer">
-        Los datos persisten en SQLite (servidor). Al cerrar la semana con envío, iniciá una nueva
-        reunión para continuar el seguimiento.
+        Mail: variables MINUTAS_SMTP_* en la PC servidor · ver COMO_MINUTAS.txt
       </footer>
     </div>
   );

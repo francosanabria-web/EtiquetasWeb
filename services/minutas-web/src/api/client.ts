@@ -1,6 +1,9 @@
 import type {
   Actualizacion,
   EntregaParcial,
+  NotaFila,
+  PedidoGrupo,
+  ResumenImport,
   SesionDetalle,
   SesionResumen,
   Solicitud,
@@ -11,6 +14,9 @@ import type {
 export const API_URL = (
   import.meta.env.VITE_API_URL ?? "http://localhost:8012"
 ).replace(/\/$/, "");
+
+/** Si la API no responde (proceso colgado), no bloquear la UI para siempre. */
+const FETCH_TIMEOUT_MS = 15_000;
 
 export class ApiError extends Error {
   status: number;
@@ -35,19 +41,31 @@ async function leerError(resp: Response): Promise<string> {
 }
 
 async function fetchApi(path: string, init?: RequestInit): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   try {
     return await fetch(`${API_URL}${path}`, {
       ...init,
+      signal: ctrl.signal,
       headers: {
         "Content-Type": "application/json",
         ...init?.headers,
       },
     });
-  } catch {
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new ApiError(
+        0,
+        `La API no respondió en ${FETCH_TIMEOUT_MS / 1000}s (${API_URL}). ` +
+          "Reiniciá minutas-api (Ctrl+C en el supervisor y volvé a ejecutarlo)."
+      );
+    }
     throw new ApiError(
       0,
       `No se pudo contactar la API en ${API_URL}. ¿Está encendida minutas-api?`
     );
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -210,3 +228,58 @@ export async function enviarMinuta(
 }
 
 export type EntregaParcialExport = EntregaParcial;
+
+export async function importarExcel(sesionId: number, file: File): Promise<ResumenImport> {
+  const fd = new FormData();
+  fd.append("archivo", file);
+  let resp: Response;
+  try {
+    resp = await fetch(`${API_URL}/sesiones/${sesionId}/importar-excel`, {
+      method: "POST",
+      body: fd,
+    });
+  } catch {
+    throw new ApiError(0, `No se pudo contactar la API en ${API_URL}`);
+  }
+  if (!resp.ok) throw new ApiError(resp.status, await leerError(resp));
+  return (await resp.json()) as ResumenImport;
+}
+
+export async function listarPedidos(
+  sesionId: number,
+  soloElegibles = true
+): Promise<PedidoGrupo[]> {
+  return json(
+    await fetchApi(`/sesiones/${sesionId}/pedidos?solo_elegibles=${soloElegibles ? "true" : "false"}`)
+  );
+}
+
+export async function abandonarSesion(sesionId: number): Promise<SesionResumen> {
+  return json(
+    await fetchApi(`/sesiones/${sesionId}/abandonar`, {
+      method: "POST",
+    })
+  );
+}
+
+export async function fijarSeleccionReunion(sesionId: number, refs: string[]): Promise<void> {
+  await json(
+    await fetchApi(`/sesiones/${sesionId}/seleccion-reunion`, {
+      method: "PUT",
+      body: JSON.stringify({ refs }),
+    })
+  );
+}
+
+export async function agregarNotaFila(
+  sesionId: number,
+  filaId: number,
+  payload: { texto: string; autor?: string }
+): Promise<NotaFila> {
+  return json(
+    await fetchApi(`/sesiones/${sesionId}/filas/${filaId}/notas`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    })
+  );
+}

@@ -39,7 +39,7 @@ def _default_destinatarios() -> list[str]:
 def construir_asunto(sesion: SesionDetalle, personalizado: Optional[str] = None) -> str:
     if personalizado:
         return personalizado
-    return f"Minuta semanal Compras — {sesion.semana_iso} ({sesion.fecha})"
+    return f"Minuta reunión — {sesion.semana_iso} ({sesion.fecha})"
 
 
 def _bloque_solicitud_texto(s: Solicitud) -> str:
@@ -150,30 +150,36 @@ def enviar_minuta(
     cuerpo_texto: str,
     cuerpo_html: str,
 ) -> None:
-    if not _smtp_configurado():
+    """
+    Envío multipart texto+HTML.
+    Por defecto usa Gmail (smtp.gmail.com:587) como almacen_gui.py.
+    Variables: MINUTAS_SMTP_HOST, MINUTAS_SMTP_PORT, MINUTAS_SMTP_FROM,
+    MINUTAS_SMTP_USER, MINUTAS_SMTP_PASSWORD.
+    """
+    host = os.environ.get("MINUTAS_SMTP_HOST", "smtp.gmail.com")
+    port = int(os.environ.get("MINUTAS_SMTP_PORT", "587"))
+    from_addr = os.environ.get("MINUTAS_SMTP_FROM") or os.environ.get("MINUTAS_SMTP_USER")
+    user = os.environ.get("MINUTAS_SMTP_USER") or from_addr
+    password = os.environ.get("MINUTAS_SMTP_PASSWORD")
+
+    if not from_addr or not password:
         raise EmailNoConfigurado(
-            "SMTP no configurado. Definí MINUTAS_SMTP_HOST y MINUTAS_SMTP_FROM."
+            "Configurá MINUTAS_SMTP_FROM y MINUTAS_SMTP_PASSWORD (cuenta Gmail/app password)."
         )
 
-    host = os.environ["MINUTAS_SMTP_HOST"]
-    port = int(os.environ.get("MINUTAS_SMTP_PORT", "587"))
-    user = os.environ.get("MINUTAS_SMTP_USER")
-    password = os.environ.get("MINUTAS_SMTP_PASSWORD")
-    from_addr = os.environ["MINUTAS_SMTP_FROM"]
-    use_tls = os.environ.get("MINUTAS_SMTP_TLS", "true").lower() != "false"
-
-    msg = MIMEMultipart("alternative")
+    msg = MIMEMultipart("mixed")
     msg["Subject"] = asunto
     msg["From"] = from_addr
     msg["To"] = ", ".join(destinatarios)
-    msg.attach(MIMEText(cuerpo_texto, "plain", "utf-8"))
-    msg.attach(MIMEText(cuerpo_html, "html", "utf-8"))
+
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(cuerpo_texto, "plain", "utf-8"))
+    alt.attach(MIMEText(cuerpo_html, "html", "utf-8"))
+    msg.attach(alt)
 
     with smtplib.SMTP(host, port, timeout=30) as smtp:
-        if use_tls:
-            smtp.starttls()
-        if user and password:
-            smtp.login(user, password)
+        smtp.starttls()
+        smtp.login(str(user).strip(), str(password).strip())
         smtp.sendmail(from_addr, destinatarios, msg.as_string())
 
 

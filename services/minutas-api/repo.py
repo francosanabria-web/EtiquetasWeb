@@ -669,6 +669,27 @@ def marcar_sesion_enviada(sesion_id: int) -> SesionResumen:
         return _row_sesion(updated)
 
 
+def cerrar_sesion_sin_enviar(sesion_id: int) -> SesionResumen:
+    """Cierra la reunión abierta sin mail (para poder iniciar otra)."""
+    with _conectar() as conn:
+        row = conn.execute("SELECT * FROM sesiones WHERE id = ?", (sesion_id,)).fetchone()
+        if not row:
+            raise LookupError("Sesión no encontrada.")
+        if row["estado"] != EstadoSesion.ABIERTA.value:
+            raise ValueError("Solo se puede abandonar una reunión abierta.")
+        ahora = _ahora_iso()
+        conn.execute(
+            """
+            UPDATE sesiones SET estado = ?, actualizado_en = ? WHERE id = ?
+            """,
+            (EstadoSesion.CERRADA.value, ahora, sesion_id),
+        )
+        conn.commit()
+        updated = conn.execute("SELECT * FROM sesiones WHERE id = ?", (sesion_id,)).fetchone()
+        assert updated is not None
+        return _row_sesion(updated)
+
+
 def datos_para_email(sesion_id: int) -> SesionDetalle:
     detalle = obtener_sesion_detalle(sesion_id)
     if not detalle:

@@ -83,6 +83,76 @@ export type TemaForm = {
   descripcion: string;
 };
 
+export type FilaPedido = {
+  id: number;
+  ref_pedido: string;
+  fila_excel: number;
+  fecha_solicitud: string;
+  cant_articulos_pedido?: string;
+  num_odoo?: string;
+  num_solicitud?: string;
+  solicitante: string;
+  tipo_solicitud: string;
+  maquina_linea: string;
+  almacenista: string;
+  codigo: string;
+  descripcion: string;
+  cantidad: string;
+  unidad: string;
+  precio: string;
+  total: string;
+  moneda: string;
+  proveedor: string;
+  oc_rq: string;
+  fecha_oc: string;
+  comprador: string;
+  fecha_envio_compras: string;
+  estado_item: string;
+  estado_solicitud: string;
+  elegible: boolean;
+  cumplida: boolean;
+  seleccionada: boolean;
+  notas?: NotaFila[];
+};
+
+export type PedidoGrupo = {
+  ref_pedido: string;
+  fecha_solicitud: string;
+  solicitante: string;
+  tipo_solicitud: string;
+  maquina_linea: string;
+  estado_solicitud: string;
+  num_odoo?: string;
+  num_solicitud?: string;
+  almacenista?: string;
+  filas: FilaPedido[];
+  seleccionada: boolean;
+  cantidad_filas: number;
+};
+
+export type ResumenImport = {
+  importacion_id: number;
+  hoja: string;
+  nombre_archivo: string;
+  importado_en: string;
+  resumen: {
+    total_filas: number;
+    elegibles: number;
+    cumplidas: number;
+    pedidos_elegibles: number;
+    pedidos_total: number;
+  };
+};
+
+export type NotaFila = {
+  id: number;
+  sesion_id: number;
+  fila_id: number;
+  texto: string;
+  autor: string | null;
+  creado_en: string;
+};
+
 export const URGENCIA_OPCIONES: { value: Urgencia; label: string }[] = [
   { value: "baja", label: "Baja" },
   { value: "media", label: "Media" },

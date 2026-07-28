@@ -3,14 +3,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import smtplib
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 import repo
+import repo_import
+from excel_parser import parsear_excel
+from mail_builder import construir_mail_minuta_excel
 from email_service import (
     EmailNoConfigurado,
     construir_asunto,
@@ -39,9 +44,29 @@ from models import (
 )
 
 
+def _cargar_env_local() -> None:
+    """Lee services/minutas-api/.env (no .env.example) al arrancar."""
+    env_path = Path(__file__).resolve().parent / ".env"
+    if not env_path.is_file():
+        return
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = val
+
+
+_cargar_env_local()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     repo.init_db()
+    repo_import.init_import_db()
     yield
 
 
@@ -68,6 +93,28 @@ def _http_from_value(e: ValueError) -> HTTPException:
 
 def _http_from_lookup(e: LookupError) -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+def _email_desde_excel(sesion_id: int, asunto_custom: str | None = None):
+    sesion = repo.obtener_sesion_detalle(sesion_id)
+    if not sesion:
+        raise LookupError("Sesión no encontrada.")
+    pedidos = repo_import.listar_pedidos_agrupados(sesion_id, solo_elegibles=False)
+    pedidos = [p for p in pedidos if p["seleccionada"]]
+    notas = repo_import.notas_por_sesion(sesion_id)
+    if pedidos:
+        txt, html = construir_mail_minuta_excel(
+            sesion.semana_iso,
+            sesion.fecha,
+            sesion.responsable,
+            pedidos,
+            notas,
+            sesion.notas_generales,
+        )
+        asunto = asunto_custom or f"Minuta reunión — {sesion.semana_iso} ({sesion.fecha})"
+        return asunto, txt, html
+    asunto = construir_asunto(sesion, asunto_custom)
+    return asunto, construir_cuerpo_texto(sesion), construir_cuerpo_html(sesion)
 
 
 @app.get("/health", tags=["meta"])
@@ -181,27 +228,86 @@ def patch_tema(tema_id: int, body: TemaUpdate) -> Tema:
         raise _http_from_lookup(e) from e
 
 
+@app.post("/sesiones/{sesion_id}/abandonar", response_model=SesionResumen, tags=["sesiones"])
+def abandonar_sesion(sesion_id: int) -> SesionResumen:
+    try:
+        return repo.cerrar_sesion_sin_enviar(sesion_id)
+    except LookupError as e:
+        raise _http_from_lookup(e) from e
+    except ValueError as e:
+        raise _http_from_value(e) from e
+
+
+@app.post("/sesiones/{sesion_id}/importar-excel", tags=["import"])
+async def importar_excel(sesion_id: int, archivo: UploadFile = File(...)):
+    if not archivo.filename or not archivo.filename.lower().endswith((".xlsx", ".xlsm", ".xls")):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Formato no soportado. Use .xlsx")
+    try:
+        raw = await archivo.read()
+        # parsear_excel es CPU/IO pesado: fuera del event loop para no colgar /health ni la carga inicial
+        hoja, filas = await asyncio.to_thread(parsear_excel, raw)
+        meta = await asyncio.to_thread(
+            repo_import.guardar_importacion,
+            sesion_id,
+            archivo.filename,
+            hoja,
+            filas,
+        )
+        return meta
+    except LookupError as e:
+        raise _http_from_lookup(e) from e
+    except ValueError as e:
+        raise _http_from_value(e) from e
+    except Exception as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Error leyendo Excel: {e}") from e
+
+
+@app.get("/sesiones/{sesion_id}/pedidos", tags=["import"])
+def listar_pedidos(sesion_id: int, solo_elegibles: bool = True):
+    return repo_import.listar_pedidos_agrupados(sesion_id, solo_elegibles=solo_elegibles)
+
+
+@app.put("/sesiones/{sesion_id}/seleccion-reunion", tags=["import"])
+def seleccion_reunion(sesion_id: int, body: dict):
+    refs = body.get("refs") or []
+    if not isinstance(refs, list):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="refs debe ser una lista")
+    n = repo_import.fijar_seleccion_reunion(sesion_id, [str(r) for r in refs])
+    return {"seleccionadas": n, "refs": refs}
+
+
+@app.patch("/sesiones/{sesion_id}/seleccion-pedidos", tags=["import"])
+def seleccion_pedidos(sesion_id: int, body: dict):
+    refs = body.get("refs") or []
+    seleccionada = bool(body.get("seleccionada", True))
+    if not isinstance(refs, list):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="refs debe ser una lista")
+    n = repo_import.actualizar_seleccion(sesion_id, [str(r) for r in refs], seleccionada)
+    return {"actualizadas": n}
+
+
+@app.post("/sesiones/{sesion_id}/filas/{fila_id}/notas", tags=["import"])
+def nota_fila(sesion_id: int, fila_id: int, body: ActualizacionCreate):
+    try:
+        return repo_import.agregar_nota_fila(sesion_id, fila_id, body.texto, body.autor)
+    except LookupError as e:
+        raise _http_from_lookup(e) from e
+
+
 @app.get("/sesiones/{sesion_id}/preview-email", response_model=PreviewEmailResponse, tags=["email"])
 def preview_email(sesion_id: int, asunto: str | None = None) -> PreviewEmailResponse:
     try:
-        sesion = repo.datos_para_email(sesion_id)
+        a, txt, html = _email_desde_excel(sesion_id, asunto)
     except LookupError as e:
         raise _http_from_lookup(e) from e
-    return PreviewEmailResponse(
-        asunto=construir_asunto(sesion, asunto),
-        cuerpo_texto=construir_cuerpo_texto(sesion),
-        cuerpo_html=construir_cuerpo_html(sesion),
-    )
+    return PreviewEmailResponse(asunto=a, cuerpo_texto=txt, cuerpo_html=html)
 
 
 @app.post("/sesiones/{sesion_id}/enviar", response_model=EnviarMinutaResponse, tags=["email"])
 def enviar_minuta_endpoint(sesion_id: int, body: EnviarMinutaRequest) -> EnviarMinutaResponse:
     try:
-        sesion = repo.datos_para_email(sesion_id)
         destinatarios = destinatarios_default_o([str(e) for e in body.destinatarios])
-        asunto = construir_asunto(sesion, body.asunto)
-        texto = construir_cuerpo_texto(sesion)
-        html = construir_cuerpo_html(sesion)
+        asunto, texto, html = _email_desde_excel(sesion_id, body.asunto)
         enviar_minuta(destinatarios, asunto, texto, html)
         repo.marcar_sesion_enviada(sesion_id)
     except LookupError as e:
