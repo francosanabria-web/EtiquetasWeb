@@ -1,0 +1,44 @@
+{
+  "_comentario": "CATÁLOGOS EDITABLES — Solicitud de pedidos. Editar este archivo y reiniciar el servicio (puerto 8014) para aplicar cambios. 'areas' y 'proveedores' son sugerencias de texto libre (el sistema también aprende de lo cargado). 'cuentas_contables' es lista fija del pedido.",
+  "estados": [
+    { "id": "borrador", "label": "Borrador" },
+    { "id": "en_proceso", "label": "En proceso" },
+    { "id": "parcial", "label": "Parcial" },
+    { "id": "cumplido", "label": "Cumplido" },
+    { "id": "cancelado", "label": "Cancelado" }
+  ],
+  "tipos": [
+    { "id": "normal", "label": "Normal" },
+    { "id": "urgente", "label": "Urgente" },
+    { "id": "tr", "label": "TR (Trabajo Realizado)" }
+  ],
+  "areas": [
+    "Repuestos",
+    "Conservacion de edificio"
+  ],
+  "cuentas_contables": [
+    "7120001 - Conservación de edificio",
+    "7120002 - Conservación de equipo",
+    "7120003 - Conservación de vehículo",
+    "7120004 - Repuestos",
+    "7120006 - Conservación proyectos",
+    "7130002 - Jardinería",
+    "7150001 - Gastos de movilidad",
+    "7150002 - Remises",
+    "7150002 - Refrigerios/Comidas",
+    "7150005 - Hoteles",
+    "7220002 - Flete por despacho",
+    "7240001 - Materiales auxiliares fijos",
+    "7180001 - Materiales de oficina",
+    "7230005 - Gastos de consultoría"
+  ],
+  "unidades_medida": [
+    "UN",
+    "KG",
+    "MT",
+    "LT",
+    "CJ",
+    "PAR"
+  ],
+  "proveedores": []
+}
