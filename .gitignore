@@ -6,6 +6,19 @@ __pycache__/
 venv/
 env/
 
+# Cachés de herramientas Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / frontend (dependencias y builds — NO se versionan)
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+
 # Base de datos local de la cola de impresión (no se versiona)
 *.db
 cola.db
@@ -30,6 +43,14 @@ preview_*.png
 # Logs del print-agent
 log_impresion_etiquetas.txt
 *.log
+
+# Logs y temporales de scripts / servicios
+scripts/logs/
+*.tmp
+*.bak
+
+# Datos/estado runtime de los servicios (se generan solos; no se versionan)
+backend/*/data/
 
 # Sistema operativo / editor
 .DS_Store
