@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Usuario } from "../config/modulos";
+import type { Usuario } from "../config/navegacion";
 import { autenticarDemo } from "./demoUsers";
 
 const STORAGE_KEY = "panol_shell_session";

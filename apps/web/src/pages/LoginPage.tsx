@@ -23,8 +23,8 @@ export default function LoginPage() {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={enviar}>
-        <h1>Pañol</h1>
-        <p className="sub">Sistema integrado de gestión</p>
+        <h1>Sistemas Pañol</h1>
+        <p className="sub">Portal integrado de gestión</p>
 
         <label>
           Usuario / email
@@ -59,8 +59,9 @@ export default function LoginPage() {
           <summary>Cuentas de prueba (solo desarrollo)</summary>
           <ul>
             <li><strong>Admin:</strong> admin@panol.local / admin123</li>
-            <li><strong>Pañolero:</strong> panolero@panol.local / panol123</li>
-            <li><strong>Consulta:</strong> consulta@panol.local / consulta123</li>
+            <li><strong>Pañol:</strong> panol@panol.local / panol123</li>
+            <li><strong>Supervisor:</strong> supervisor@panol.local / supervisor123</li>
+            <li><strong>Jefatura/Gerencia:</strong> jefatura@panol.local / jefatura123</li>
           </ul>
         </details>
       </form>

@@ -1,34 +1,58 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { lazy, Suspense } from "react";
 import { AuthProvider } from "./auth/AuthContext";
 import { RequireAuth } from "./auth/RequireAuth";
+import ErrorBoundary from "./components/ErrorBoundary";
+import AppShell from "./layouts/AppShell";
 import HomePage from "./pages/HomePage";
 import LoginPage from "./pages/LoginPage";
-import ModuloPlaceholder from "./pages/ModuloPlaceholder";
+import ActivosFueraPage from "./pages/ActivosFueraPage";
+import ModuloEnConstruccion from "./pages/ModuloEnConstruccion";
+import MinutaListadoPage from "./modules/minuta/MinutaListadoPage";
+import MinutaReunionPage from "./modules/minuta/MinutaReunionPage";
+import SolicitudesPage from "./modules/solicitudes/SolicitudesPage";
+
+const KpiDashboard = lazy(() => import("./components/kpis/KpiDashboard"));
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route element={<RequireAuth />}>
-            <Route path="/" element={<HomePage />} />
-            <Route
-              path="/modulos/panol"
-              element={<ModuloPlaceholder titulo="Pañol — Buscador" />}
-            />
-            <Route
-              path="/modulos/salidas"
-              element={<ModuloPlaceholder titulo="Salidas de pañol" />}
-            />
-            <Route
-              path="/modulos/inventario"
-              element={<ModuloPlaceholder titulo="Inventario" />}
-            />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route element={<RequireAuth />}>
+              <Route element={<AppShell />}>
+                <Route path="/" element={<HomePage />} />
+                <Route
+                  path="/salidas"
+                  element={<ModuloEnConstruccion titulo="Salidas" />}
+                />
+                <Route
+                  path="/reportes"
+                  element={<ModuloEnConstruccion titulo="Reportes" />}
+                />
+                <Route
+                  path="/activos"
+                  element={<ActivosFueraPage />}
+                />
+                <Route path="/minuta" element={<MinutaListadoPage />} />
+                <Route path="/minuta/:reunionId" element={<MinutaReunionPage />} />
+                <Route path="/solicitudes" element={<SolicitudesPage />} />
+                <Route
+                  path="/kpis"
+                  element={
+                    <Suspense fallback={<p className="sub">Cargando KPIs…</p>}>
+                      <KpiDashboard />
+                    </Suspense>
+                  }
+                />
+              </Route>
+            </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

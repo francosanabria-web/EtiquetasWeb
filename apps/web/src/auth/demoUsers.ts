@@ -1,4 +1,4 @@
-import type { Rol, Usuario } from "../config/modulos";
+import type { Rol, Usuario } from "../config/navegacion";
 
 /**
  * Usuarios de demostración hasta conectar Firebase Auth / backend de cuentas.
@@ -14,17 +14,17 @@ export const USUARIOS_DEMO: Array<Usuario & { clave: string }> = [
   },
   {
     id: "2",
-    nombre: "Pañolero",
-    email: "panolero@panol.local",
+    nombre: "Pañol",
+    email: "panol@panol.local",
     clave: "panol123",
-    rol: "panolero",
+    rol: "panol",
   },
   {
     id: "3",
-    nombre: "Consulta",
-    email: "consulta@panol.local",
-    clave: "consulta123",
-    rol: "consulta",
+    nombre: "Supervisor",
+    email: "supervisor@panol.local",
+    clave: "supervisor123",
+    rol: "supervisor",
   },
   {
     id: "4",
@@ -49,11 +49,11 @@ export function etiquetaRol(rol: Rol): string {
   switch (rol) {
     case "admin":
       return "Administrador";
-    case "panolero":
-      return "Pañolero";
-    case "consulta":
-      return "Solo consulta";
+    case "panol":
+      return "Pañol";
+    case "supervisor":
+      return "Supervisor";
     case "jefatura":
-      return "Jefatura";
+      return "Jefatura / Gerencia";
   }
 }
