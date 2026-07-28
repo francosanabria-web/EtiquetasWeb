@@ -1,0 +1,80 @@
+# Arranque — Módulo Solicitudes / Minutas (1 solo paso)
+
+## Automático (recomendado)
+
+```powershell
+cd C:\Users\Mantenimiento\Desktop\AppWebSalidas\scripts
+.\supervisor_minutas.ps1
+```
+
+Levanta **minutas-api** (:8012) + **minutas-web** (:5175). No hace falta abrir 2 terminales.
+
+## Manual (desarrollo)
+
+Terminal 1 — API (crear venv la primera vez):
+
+```powershell
+cd C:\Users\Mantenimiento\Desktop\AppWebSalidas\services\minutas-api
+python -m venv .venv
+.\.venv\Scripts\pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8012 --reload
+```
+
+Terminal 2 — Web:
+
+```powershell
+cd C:\Users\Mantenimiento\Desktop\AppWebSalidas\services\minutas-web
+npm install
+npm run dev:lan
+```
+
+Abrí **http://localhost:5175** (o http://IP-PC:5175).
+
+## Mail — dónde cargar usuario y contraseña
+
+El mail **no se configura en la web**. Se cargan variables de entorno en la **PC servidor**, **antes** de arrancar la API (misma lógica que `almacen_gui.py` — Gmail SMTP puerto 587).
+
+### Opción A — PowerShell (sesión actual)
+
+En la misma ventana donde vas a levantar la API o el supervisor:
+
+```powershell
+$env:MINUTAS_SMTP_HOST = "smtp.gmail.com"
+$env:MINUTAS_SMTP_PORT = "587"
+$env:MINUTAS_SMTP_USER = "tu@gmail.com"
+$env:MINUTAS_SMTP_PASSWORD = "xxxx xxxx xxxx xxxx"   # contraseña de aplicación Gmail
+$env:MINUTAS_SMTP_FROM = "tu@gmail.com"
+$env:MINUTAS_EMAIL_DEFAULT_TO = "jefatura@empresa.com,compras@empresa.com"
+```
+
+Luego ejecutá el supervisor o uvicorn en **esa misma ventana**.
+
+### Opción B — Archivo .env local (no subir a git)
+
+Creá `services\minutas-api\.env` (copiá de `.env.example` si existe) y cargalo antes de arrancar:
+
+```powershell
+cd C:\Users\Mantenimiento\Desktop\AppWebSalidas\services\minutas-api
+Get-Content .env | ForEach-Object {
+  if ($_ -match '^([^#=]+)=(.*)$') { Set-Item -Path "env:$($matches[1].Trim())" -Value $matches[2].Trim() }
+}
+.\..\etiquetas-api\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8012
+```
+
+### Gmail — contraseña de aplicación
+
+1. Cuenta Google → Seguridad → Verificación en 2 pasos (activada).
+2. Contraseñas de aplicaciones → generar una para "Correo".
+3. Usar esa clave de 16 caracteres en `MINUTAS_SMTP_PASSWORD` (no la contraseña normal de Gmail).
+
+### Probar envío
+
+1. Iniciar reunión, importar Excel, seleccionar pedidos, anotar si hace falta.
+2. **Cerrar y enviar mail** → preview → enviar.
+3. Si falla, revisar `scripts\logs\minutas-api.err`.
+
+## Cambiar pañolero / volver atrás
+
+- **Nombre:** editable arriba a la derecha durante la reunión (Guardar). También al iniciar.
+- **Reunión pasada:** panel derecho → clic en semana → banner azul **Volver a reunión actual**.
+- **Sin reunión abierta:** pantalla inicial → **Comenzar reunión** de nuevo.

@@ -1,0 +1,7 @@
+Colocá aquí el Excel diario de solicitudes de pedidos.
+
+Nombre preferido para pruebas: solicitudes_compras_ejemplo.xlsx
+
+El módulo minutas importa la hoja "Base datos 2025" (o PP2026 / Base datos 2026).
+
+Este archivo no se sube a git por tamaño; cada PC del pañol mantiene su copia local.

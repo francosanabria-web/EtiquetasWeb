@@ -1,0 +1,42 @@
+# Reglas permanentes de Cursor — Sistemas Pañol
+
+## Documentación en Obsidian (OBLIGATORIO)
+
+Al finalizar cada tarea, y antes de dar por cerrada la respuesta, actualizar
+el vault de Obsidian ubicado en G:\Unidades compartidas\Mantenimiento\MANTENIMIENTO  OZLA 2024-2025\17. Pañol\pañol v5.0\PP así:
+
+1. Si se creó o modificó un módulo:
+   → Actualizar el .md correspondiente en `02 - Módulos/`
+   → Actualizar el estado en `01 - Estado del Proyecto/Roadmap.md`
+
+2. Si se tomó una decisión de arquitectura (stack, estructura, enfoque):
+   → Agregar una fila al log en `01 - Estado del Proyecto/Decisiones.md`
+   → Formato: | [fecha de hoy] | [decisión] | [alternativa descartada] | [razón] |
+
+3. Si una tarea quedó pendiente o fue identificada pero no completada:
+   → Agregar a `01 - Estado del Proyecto/Pendientes.md`
+
+4. Si se creó un endpoint de API nuevo:
+   → Actualizar `03 - Documentacion Tecnica/Backend/API.md`
+
+5. Si se modificó el esquema de MariaDB:
+   → Actualizar `03 - Documentacion Tecnica/Base_de_Datos/MariaDB_Esquema.md`
+
+6. Si se modificó el contrato con Firestore:
+   → Actualizar `03 - Documentacion Tecnica/Base_de_Datos/Firestore_Contrato.md`
+
+Reglas de escritura en Obsidian:
+- Siempre incluir "Última actualización: [fecha]" al inicio del archivo modificado
+- No borrar contenido existente salvo que esté explícitamente desactualizado
+- Si algo no está claro, marcarlo con ⚠️ en vez de inventar
+
+## Restricciones permanentes
+
+- NUNCA modificar archivos dentro de `AppPanolWeb/` salvo instrucción explícita
+  del usuario que diga exactamente "modificar AppPanolWeb"
+- NUNCA modificar `almacen_gui.py` ni los archivos .xlsx de producción
+  (`master_codes.xlsx`, `master_salidas.xlsx`) salvo instrucción explícita
+- Antes de generar código de un módulo nuevo: mostrar el plan y esperar
+  confirmación del usuario
+- Si algo del comportamiento de negocio no está claro en el código: preguntar,
+  no asumir
