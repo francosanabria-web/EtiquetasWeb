@@ -15,6 +15,7 @@ from datetime import date, datetime
 from typing import Any, BinaryIO, Optional
 
 import openpyxl
+from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.worksheet.worksheet import Worksheet
 
 # Mapa de columnas del Excel pañol (hoja "Base datos 2025").
@@ -47,6 +48,7 @@ COL = {
 
 # Índice 0-based para iter_rows(values_only=True): A=0, B=1, …
 _COL_IDX = {letter: ord(letter) - ord("A") for letter in COL.values()}
+_COL_REV = {v: k for k, v in COL.items()}
 
 HOJAS_PREFERIDAS = ("Base datos 2025", "PP2026", "Base datos 2026")
 
@@ -178,6 +180,7 @@ class FilaPedido:
     estado_solicitud: str
     cumplida: bool
     elegible_reunion: bool
+    novedades: str = ""
 
     def clave_agrupacion(self) -> str:
         return self.ref_pedido or f"FILA-{self.fila_excel}"
@@ -292,3 +295,180 @@ def resumen_importacion(filas: list[FilaPedido]) -> dict[str, int]:
         "pedidos_elegibles": len(agrupar_por_pedido(elegibles)),
         "pedidos_total": len(agrupar_por_pedido(filas)),
     }
+
+
+def exportar_excel(
+    source_bytes: bytes | None,
+    selected_refs: list[str] | None = None,
+    cols: list[str] | None = None,
+    filas_db: list[Any] | None = None,
+) -> io.BytesIO:
+    """Genera un .xlsx fresco con las filas seleccionadas ordenadas por fila_excel ASC.
+
+    Si source_bytes es None (sesión sin archivo original), usa filas_db si se provee.
+    """
+    width_map: dict[str, float] = {}
+    default_width = 12.0
+    anchos_especificos: dict[str, float] = {
+        "B": 30.0, "L": 30.0,
+        "E": 14.0, "T": 14.0, "V": 14.0,
+        "M": 12.0, "O": 12.0, "P": 12.0,
+    }
+
+    if source_bytes:
+        try:
+            if isinstance(source_bytes, bytes):
+                source = io.BytesIO(source_bytes)
+            else:
+                source = source_bytes
+            wb_src = openpyxl.load_workbook(source, data_only=True, read_only=True)
+            ws_src = _elegir_hoja(wb_src, None)
+            for col_idx in range(1, 25):
+                letter = openpyxl.utils.get_column_letter(col_idx)
+                dim = ws_src.column_dimensions.get(letter)
+                width_map[letter] = dim.width if dim and dim.width else default_width
+            for letter, w in anchos_especificos.items():
+                width_map[letter] = w
+            wb_src.close()
+        except Exception:
+            for col_idx in range(1, 25):
+                letter = openpyxl.utils.get_column_letter(col_idx)
+                width_map[letter] = anchos_especificos.get(letter, default_width)
+    else:
+        for col_idx in range(1, 25):
+            letter = openpyxl.utils.get_column_letter(col_idx)
+            width_map[letter] = anchos_especificos.get(letter, default_width)
+
+    # Parsear filas
+    if filas_db is not None:
+        filas: list[Any] = filas_db  # puede ser list[dict] o list[FilaPedido]
+    elif source_bytes:
+        _, filas = parsear_excel(source_bytes)
+    else:
+        filas = []
+
+    # Filtrar elegibles y refs seleccionadas (soporta dict y FilaPedido)
+    def _es_elegible(x: Any) -> bool:
+        if isinstance(x, dict):
+            return bool(x.get("elegible"))
+        return bool(getattr(x, "elegible_reunion", False))
+
+    def _ref_pedido(x: Any) -> str:
+        if isinstance(x, dict):
+            return str(x.get("ref_pedido", ""))
+        return str(getattr(x, "ref_pedido", ""))
+
+    filas = [f for f in filas if _es_elegible(f)]
+    if selected_refs:
+        # selected_refs viene de DB ya filtrado, pero por si acaso filtrar de nuevo
+        filas = [f for f in filas if _ref_pedido(f) in selected_refs]
+
+    # Ordenar por fila_excel ASC
+    def _fila_excel_key(x: Any) -> int:
+        if isinstance(x, dict):
+            return int(x.get("fila_excel", 0) or 0)
+        return int(getattr(x, "fila_excel", 0) or 0)
+    filas.sort(key=_fila_excel_key)
+
+    # Determinar columnas a escribir (A-X)
+    if cols:
+        write_keys = [k for k in COL.keys() if k in cols]
+    else:
+        write_keys = list(COL.keys())
+
+    # Crear nuevo workbook
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Novedades"
+
+    # Encabezados
+    header_fill = PatternFill("solid", fgColor="1F4E78")
+    header_font = Font(color="FFFFFF", bold=True)
+    thin_border = Border(
+        left=Side(style="thin", color="999999"),
+        right=Side(style="thin", color="999999"),
+        top=Side(style="thin", color="999999"),
+        bottom=Side(style="thin", color="999999"),
+    )
+
+    # Headers for A-X at sequential positions 1..len(write_keys)
+    for col_idx, key in enumerate(write_keys, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=key)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    # Novedades at Y (25)
+    y_header = ws.cell(row=1, column=25, value="Novedades")
+    y_header.fill = header_fill
+    y_header.font = header_font
+    y_header.border = thin_border
+    y_header.alignment = Alignment(horizontal="center", vertical="center")
+    # fila_excel hidden header at AA (27)
+    fe_header = ws.cell(row=1, column=27, value="fila_excel")
+    fe_header.fill = header_fill
+    fe_header.font = header_font
+    fe_header.border = thin_border
+    fe_header.alignment = Alignment(horizontal="center", vertical="center")
+
+    # Ancho de columnas
+    for letter, w in width_map.items():
+        if letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            ws.column_dimensions[letter].width = w
+
+    # Filas de datos
+    for row_idx, f in enumerate(filas, start=2):
+        for col_idx, key in enumerate(write_keys, start=1):
+            if isinstance(f, dict):
+                val = f.get(key, "")
+            else:
+                val = getattr(f, key, "")
+            if key in ("fecha_solicitud", "fecha_oc", "fecha_envio_compras"):
+                cell = ws.cell(row=row_idx, column=col_idx, value=str(val) if val else "")
+            else:
+                cell = ws.cell(row=row_idx, column=col_idx, value=str(val) if val is not None else "")
+            cell.border = thin_border
+            cell.alignment = Alignment(vertical="center")
+
+        # Columna Y (Novedades) - vacía por defecto, si hay notas del DB pre-cargar
+        novedades_val = ""
+        if isinstance(f, dict):
+            notas = f.get("notas", [])
+            if notas:
+                novedades_val = "; ".join(n.get("texto","") for n in notas if n.get("texto"))
+            else:
+                novedades_val = f.get("novedades", "") or ""
+        else:
+            novedades_val = getattr(f, "novedades", "") or ""
+        y_cell = ws.cell(row=row_idx, column=25, value=novedades_val)
+        y_cell.border = thin_border
+        y_cell.alignment = Alignment(vertical="center")
+
+        # Columna AA (27) fila_excel oculta para recuperación en importar-novedades
+        fila_excel_val = f.get("fila_excel") if isinstance(f, dict) else getattr(f, "fila_excel", 0)
+        ws.cell(row=row_idx, column=27, value=fila_excel_val)
+
+    # Auto-filtro y freeze panes (incluye AA)
+    max_row = len(filas) + 1
+    ws.auto_filter.ref = f"A1:AA{max_row}"
+    ws.freeze_panes = "A2"
+
+    # Ocultar columna AA
+    ws.column_dimensions["AA"].hidden = True
+
+    # Protección: todas las celdas bloqueadas excepto columna Y
+    # Necesario usar Protection
+    from openpyxl.styles.protection import Protection
+    for col_idx in range(1, 28):
+        for row_idx in range(1, max_row + 1):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            cell.protection = Protection(locked=(col_idx != 25))
+
+    ws.protection.sheet = True
+    ws.protection.password = ""
+
+    # Escribir a BytesIO
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output

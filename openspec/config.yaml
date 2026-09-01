@@ -1,0 +1,36 @@
+schema: spec-driven
+
+context: |
+  Stack: Python 3.12+ microservices (FastAPI) + React 19/TypeScript/Vite frontends
+  Architecture: Monorepo with 8 backend services, 3 web frontends, print agent
+  Testing: unittest (stdlib) with FastAPI TestClient; no frontend test runner detected
+  Quality: TypeScript strict mode; no linter/formatter configured
+  Persistence: SQLite per-service; Firebase for auth/catalog
+  Conventions: Spanish code comments, Obsidian docs via .cursorrules
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - Consider impact across related backend services
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Document cross-service dependencies
+    - Note Firebase vs SQLite boundaries
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    guidelines:
+      - Follow existing code patterns (unittest, no pytest)
+      - Keep Spanish code comments for business logic
+      - Maintain service isolation (each backend has own DB)
+    tdd: true
+    test_command: "python -m unittest -v"
+  verify:
+    test_command: "python -m unittest -v"
+    build_command: "tsc --noEmit"
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
