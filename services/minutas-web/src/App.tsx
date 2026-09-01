@@ -217,8 +217,11 @@ export default function App() {
                 <>
                   <ImportExcelPanel
                     disabled={!apiOk}
+                    sesionId={activa.id}
+                    selectedRefs={pedidos.filter((p) => p.seleccionada).map((p) => p.ref_pedido)}
                     onImportar={(file) => importarExcel(activa.id, file)}
                     onImportado={() => void cargarPedidos(activa.id)}
+                    onNovedadesImportado={() => void cargarPedidos(activa.id)}
                   />
                   <PedidosReunionPanel
                     sesionId={activa.id}

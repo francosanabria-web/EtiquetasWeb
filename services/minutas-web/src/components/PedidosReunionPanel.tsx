@@ -67,6 +67,14 @@ export default function PedidosReunionPanel({
     });
   }
 
+  function toggleSeleccionarTodo() {
+    if (borrador.size === pedidos.length) {
+      setBorrador(new Set());
+    } else {
+      setBorrador(new Set(pedidos.map((p) => p.ref_pedido)));
+    }
+  }
+
   async function confirmarSeleccion() {
     const refs = Array.from(borrador);
     setBusy(true);
@@ -137,6 +145,14 @@ export default function PedidosReunionPanel({
         </div>
         {!readOnly && (
           <div className="toolbar-actions">
+            <button
+              type="button"
+              className="btn-ghost btn-sm"
+              disabled={busy || pedidos.length === 0}
+              onClick={toggleSeleccionarTodo}
+            >
+              {borrador.size === pedidos.length ? "Deseleccionar todo" : "Seleccionar todo"}
+            </button>
             <button
               type="button"
               className="btn-primary"
