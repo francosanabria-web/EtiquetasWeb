@@ -90,6 +90,7 @@ export default function MinutaReunionPage() {
     } catch {}
   }, [colsVisibles, reunionId]);
   const [mostrarColumnas, setMostrarColumnas] = useState(false);
+  const [exportAbierto, setExportAbierto] = useState(false);
   // Selección para export parcial: ids de pedidos activos a exportar (vacío = todos)
   const [idsExport, setIdsExport] = useState<Set<number>>(new Set());
   const toggleExportId = useCallback((id: number, checked: boolean) => {
@@ -336,10 +337,10 @@ export default function MinutaReunionPage() {
         </div>
       </section>
 
-      {/* Export / Import + columnas ocultables + selección parcial */}
-      <section className="minuta-section">
-        <h2>Exportar para Compras</h2>
-        <p className="sub">
+      {/* Export — plegable para no interrumpir vista */}
+      <details className="minuta-section" open={exportAbierto} onToggle={(e) => setExportAbierto((e.target as HTMLDetailsElement).open)}>
+        <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 16, listStyle: "none" }}>Exportar</summary>
+        <p className="sub" style={{ marginTop: 8 }}>
           Exporta un Excel legible (auto-ancho por contenido, wrap, solo columna Novedades editable, orden preservado). Podés ocultar columnas para que no quede ancho/comprimido.
         </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
@@ -404,7 +405,7 @@ export default function MinutaReunionPage() {
           </div>
         )}
         {idsExport.size > 0 && <p className="minuta-hint" style={{ marginTop: 8 }}>{idsExport.size} pedidos seleccionados para exportar (vacío = todos).</p>}
-      </section>
+      </details>
 
       {cargando ? (
         <p className="minuta-hint">Cargando pedidos…</p>
@@ -427,8 +428,8 @@ export default function MinutaReunionPage() {
             onEliminar={ejecutarEliminar}
             onReordenar={reordenarLocal}
             onAdd={addPedido}
-            idsExport={idsExport}
-            onToggleExport={toggleExportId}
+            idsExport={exportAbierto ? idsExport : undefined}
+            onToggleExport={exportAbierto ? toggleExportId : undefined}
             columnasVisibles={colsVisibles}
           />
 

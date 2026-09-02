@@ -71,12 +71,27 @@ export default function TablaPedidosReunion({
   const [dragId, setDragId] = useState<number | null>(null);
   const [dragOverId, setDragOverId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  // Alturas por fila persistentes (para agrandar/achicar y que quede fijo)
+  const [alturas, setAlturas] = useState<Record<number, number>>(() => {
+    try {
+      const raw = localStorage.getItem("minuta-alturas");
+      if (raw) return JSON.parse(raw) as Record<number, number>;
+    } catch {}
+    return {};
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("minuta-alturas", JSON.stringify(alturas));
+    } catch {}
+  }, [alturas]);
 
+  const visibleCount = columnasVisibles ? columnasVisibles.length : 10;
   const numCols =
     (modo === "activos" ? 1 : 0) + // drag
     (modo === "activos" && onVisto ? 1 : 0) + // visto
     (idsExport ? 1 : 0) + // export selección
-    11;
+    visibleCount +
+    1; // acciones
 
   const filtrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
@@ -306,6 +321,7 @@ export default function TablaPedidosReunion({
               return (
                 <Fragment key={p.id}>
                   <tr
+                    style={alturas[p.id] ? { height: `${alturas[p.id]}px` } : undefined}
                     className={[
                       expandido ? "minuta-row-expanded" : "",
                       dragOverId === p.id ? "minuta-row-dragover" : "",
@@ -405,6 +421,10 @@ export default function TablaPedidosReunion({
                           rows={2}
                           value={p.pedido}
                           onChange={(e) => onCampo(p.id, { pedido: e.target.value })}
+                          onMouseUp={(e) => {
+                            const tr = (e.currentTarget.closest("tr") as HTMLElement) || null;
+                            if (tr) setAlturas((prev) => ({ ...prev, [p.id]: tr.offsetHeight }));
+                          }}
                           placeholder="Descripción"
                         />
                       </td>
@@ -427,6 +447,10 @@ export default function TablaPedidosReunion({
                           rows={2}
                           value={p.consultas ?? ""}
                           onChange={(e) => onCampo(p.id, { consultas: e.target.value })}
+                          onMouseUp={(e) => {
+                            const tr = (e.currentTarget.closest("tr") as HTMLElement) || null;
+                            if (tr) setAlturas((prev) => ({ ...prev, [p.id]: tr.offsetHeight }));
+                          }}
                           placeholder="Consultas…"
                         />
                       </td>
@@ -438,6 +462,10 @@ export default function TablaPedidosReunion({
                           rows={2}
                           value={borrador}
                           onChange={(e) => onBorrador(p.id, e.target.value)}
+                          onMouseUp={(e) => {
+                            const tr = (e.currentTarget.closest("tr") as HTMLElement) || null;
+                            if (tr) setAlturas((prev) => ({ ...prev, [p.id]: tr.offsetHeight }));
+                          }}
                           placeholder={`Novedades del ${fmtFecha(fechaReunion)}…`}
                         />
                       </td>
@@ -477,6 +505,22 @@ export default function TablaPedidosReunion({
                       </td>
                     )}
                     <td className="minuta-acciones">
+                      <button
+                        type="button"
+                        className="btn-ghost btn-sm"
+                        title="Agrandar fila"
+                        onClick={() => setAlturas((prev) => ({ ...prev, [p.id]: (prev[p.id] || 60) + 24 }))}
+                      >
+                        ＋
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-ghost btn-sm"
+                        title="Achicar fila"
+                        onClick={() => setAlturas((prev) => ({ ...prev, [p.id]: Math.max(44, (prev[p.id] || 60) - 24) }))}
+                      >
+                        －
+                      </button>
                       <button
                         type="button"
                         className="btn-ghost btn-sm"
