@@ -2,10 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { enviarCorreo, fetchContactos, type Contacto } from "../../api/emailClient";
 import {
+  actualizarReunion,
+  descargarBlob,
+  exportarMinutaExcel,
   fetchNovedadesReunion,
-  fetchReuniones,
-  moverPedidosReunion,
-  type Reunion,
+  importarNovedadesMinuta,
 } from "../../api/minutaClient";
 import { useAuth } from "../../auth/AuthContext";
 import { buildMinutaMail } from "./buildMinutaMail";
@@ -16,6 +17,7 @@ import SelectorDestinatarios from "./SelectorDestinatarios";
 import TablaPedidosReunion from "./TablaPedidosReunion";
 import { limpiarSesionLocal } from "./types";
 import { useMinutaSession } from "./useMinutaSession";
+import VistaIndicadores from "./VistaIndicadores";
 
 export default function MinutaReunionPage() {
   const { reunionId: idParam } = useParams();
@@ -56,8 +58,55 @@ export default function MinutaReunionPage() {
   const [errorContactos, setErrorContactos] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [mensaje, setMensaje] = useState<{ tipo: "ok" | "err"; texto: string } | null>(null);
-  const [historicoOrigen, setHistoricoOrigen] = useState<Reunion | null>(null);
-  const [recuperando, setRecuperando] = useState(false);
+  const [verIndicadores, setVerIndicadores] = useState(false);
+  const [exportando, setExportando] = useState(false);
+  const [importandoNovedades, setImportandoNovedades] = useState(false);
+  // Columnas visibles para export (por defecto todas). Guardado local para no irse de ancho.
+  const COLUMNAS_OPCIONES: { key: string; label: string }[] = [
+    { key: "fecha", label: "Fecha solicitud" },
+    { key: "n_pedido", label: "Nº solicitud" },
+    { key: "oc", label: "Nº OC" },
+    { key: "fecha_esperada", label: "Fecha esperada" },
+    { key: "pedido", label: "Descripción" },
+    { key: "estado", label: "Estado" },
+    { key: "importancia", label: "Importancia" },
+    { key: "ultima_novedad", label: "Última novedad" },
+    { key: "consultas", label: "Consultas" },
+    { key: "novedad_actual", label: "Novedad actual" },
+  ];
+  const [colsVisibles, setColsVisibles] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(`minuta-cols-${reunionId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length) return parsed as string[];
+      }
+    } catch {}
+    return COLUMNAS_OPCIONES.map((c) => c.key);
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(`minuta-cols-${reunionId}`, JSON.stringify(colsVisibles));
+    } catch {}
+  }, [colsVisibles, reunionId]);
+  const [mostrarColumnas, setMostrarColumnas] = useState(false);
+  // Selección para export parcial: ids de pedidos activos a exportar (vacío = todos)
+  const [idsExport, setIdsExport] = useState<Set<number>>(new Set());
+  const toggleExportId = useCallback((id: number, checked: boolean) => {
+    setIdsExport((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+  const toggleSeleccionarTodoExport = useCallback(() => {
+    if (idsExport.size === pedidosActivos.length) {
+      setIdsExport(new Set());
+    } else {
+      setIdsExport(new Set(pedidosActivos.map((p) => p.id)));
+    }
+  }, [idsExport.size, pedidosActivos]);
 
   useEffect(() => {
     let alive = true;
@@ -82,63 +131,7 @@ export default function MinutaReunionPage() {
     !cargando &&
     !!reunion &&
     pedidosActivos.length === 0 &&
-    pedidosFinalizados.length === 0 &&
-    !String(reunion.titulo || "").startsWith("Histórico");
-
-  useEffect(() => {
-    if (!reunionVacia || !reunion?.sector) {
-      setHistoricoOrigen(null);
-      return;
-    }
-    let alive = true;
-    fetchReuniones({ sector: reunion.sector, limite: 40 })
-      .then((list) => {
-        if (!alive) return;
-        const hist = list.find(
-          (r) =>
-            r.id !== reunionId &&
-            String(r.titulo || "").startsWith("Histórico") &&
-            Number(r.archivada ?? 0) !== 1,
-        );
-        setHistoricoOrigen(hist ?? null);
-      })
-      .catch(() => {
-        if (alive) setHistoricoOrigen(null);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [reunionVacia, reunion?.sector, reunionId]);
-
-  const recuperarDesdeHistorico = useCallback(async () => {
-    if (!historicoOrigen) return;
-    if (
-      !window.confirm(
-        `¿Traer todos los pedidos de «${historicoOrigen.titulo}» a esta reunión?\n` +
-          "Las novedades que escribiste en esta PC se mantienen si son de esos mismos ítems.",
-      )
-    ) {
-      return;
-    }
-    setRecuperando(true);
-    setMensaje(null);
-    try {
-      const n = await moverPedidosReunion(historicoOrigen.id, reunionId);
-      setMensaje({
-        tipo: "ok",
-        texto: n > 0 ? `Se recuperaron ${n} pedidos del Histórico.` : "El Histórico no tenía pedidos.",
-      });
-      setHistoricoOrigen(null);
-      await recargar();
-    } catch (e: unknown) {
-      setMensaje({
-        tipo: "err",
-        texto: e instanceof Error ? e.message : "No se pudieron recuperar los pedidos.",
-      });
-    } finally {
-      setRecuperando(false);
-    }
-  }, [historicoOrigen, reunionId, recargar]);
+    pedidosFinalizados.length === 0;
 
   const seleccionarTodos = useCallback(() => {
     setDestinatarios(contactos.map((c) => c.email));
@@ -147,6 +140,15 @@ export default function MinutaReunionPage() {
   const limpiarDestinatarios = useCallback(() => {
     setDestinatarios([]);
   }, [setDestinatarios]);
+
+  const persistirMetaReunion = useCallback(
+    (patch: { fecha?: string; sectores_comprometidos?: string }) => {
+      void actualizarReunion(reunionId, patch)
+        .then(() => recargar({ silencioso: true }))
+        .catch(() => {});
+    },
+    [reunionId, recargar],
+  );
 
   const enviar = useCallback(async () => {
     setMensaje(null);
@@ -159,8 +161,7 @@ export default function MinutaReunionPage() {
     if (pedidosActivos.length === 0 && pedidosFinalizados.length === 0) {
       setMensaje({
         tipo: "err",
-        texto:
-          "No hay ítems en esta reunión en el servidor. Si los ves solo en esta PC, recargá o verificá que no estés en una reunión vacía (los ítems pueden estar en Histórico).",
+        texto: "No hay ítems en esta reunión. Agregá pedidos antes de enviar.",
       });
       return;
     }
@@ -171,7 +172,7 @@ export default function MinutaReunionPage() {
       try {
         novedades = await fetchNovedadesReunion(reunion.sector, sesion.fecha);
       } catch {
-        /* el mail igual lleva borradores locales */
+        /* el mail igual lleva novedad_actual de los pedidos */
       }
       const mail = buildMinutaMail(sesion, [...pedidosActivos, ...pedidosFinalizados], novedades, {
         titulo: reunion.titulo,
@@ -184,16 +185,14 @@ export default function MinutaReunionPage() {
         cuerpo_texto: mail.cuerpo_texto,
       });
       resetBorradoresTrasEnvio();
-      const extra =
-        avisos.length > 0
-          ? ` Avisos: ${avisos.slice(0, 3).join(" ")}${avisos.length > 3 ? "…" : ""}`
-          : "";
-      setMensaje({ tipo: "ok", texto: `Minuta enviada y reunión registrada.${extra}` });
+      limpiarSesionLocal(scope, reunionId);
+      const extra = avisos.length ? ` Avisos: ${avisos.join(" ")}` : "";
+      setMensaje({ tipo: "ok", texto: `Minuta enviada correctamente.${extra}` });
       await recargar();
     } catch (e: unknown) {
       setMensaje({
         tipo: "err",
-        texto: e instanceof Error ? e.message : "Error al enviar el correo.",
+        texto: e instanceof Error ? e.message : "No se pudo enviar la minuta.",
       });
     } finally {
       setEnviando(false);
@@ -205,25 +204,60 @@ export default function MinutaReunionPage() {
     pedidosFinalizados,
     persistirAlEnviar,
     resetBorradoresTrasEnvio,
+    scope,
+    reunionId,
     recargar,
     setError,
   ]);
 
   const abandonar = useCallback(() => {
     if (
-      window.confirm(
-        "¿Abandonar borrador local? Los pedidos en servidor permanecen; se pierde el cache de esta sesión.",
+      !window.confirm(
+        "¿Salir sin enviar? Los cambios de ítems y novedades ya están en el servidor.",
       )
     ) {
-      limpiarSesionLocal(scope, reunionId);
-      resetBorradoresTrasEnvio();
-      setMensaje(null);
+      return;
     }
-  }, [scope, reunionId, resetBorradoresTrasEnvio]);
+    window.location.href = "/minuta";
+  }, []);
+
+  const handleExportarExcel = useCallback(async () => {
+    if (!reunion) return;
+    setMensaje(null);
+    setExportando(true);
+    try {
+      const ids = idsExport.size > 0 ? Array.from(idsExport) : undefined;
+      // colsVisibles ya incluye todas por defecto; si quiere ocultar, des tilda
+      const blob = await exportarMinutaExcel(reunion.id, { ids, cols: colsVisibles });
+      const filename = `Minuta_${reunion.sector}_${sesion.fecha}_R${reunion.id}.xlsx`;
+      descargarBlob(blob, filename);
+      setMensaje({ tipo: "ok", texto: `Excel exportado: ${pedidosActivos.length} pedidos (orden preserved, solo Novedades editable, ocultables aplicadas).` });
+    } catch (e: unknown) {
+      setMensaje({ tipo: "err", texto: e instanceof Error ? e.message : "No se pudo exportar." });
+    } finally {
+      setExportando(false);
+    }
+  }, [reunion, idsExport, colsVisibles, pedidosActivos.length, sesion.fecha]);
+
+  const handleImportarNovedades = useCallback(async (file: File | null) => {
+    if (!file || !reunion) return;
+    setMensaje(null);
+    setImportandoNovedades(true);
+    try {
+      const res = await importarNovedadesMinuta(reunion.id, file);
+      const msg = `Novedades: ${res.procesadas} nuevas, ${res.omitidas_duplicadas} duplicadas, ${res.pendientes_consulta} en consulta, ${res.no_reconocidas} no reconocidas.`;
+      setMensaje({ tipo: "ok", texto: msg });
+      await recargar();
+    } catch (e: unknown) {
+      setMensaje({ tipo: "err", texto: e instanceof Error ? e.message : "No se pudo importar novedades." });
+    } finally {
+      setImportandoNovedades(false);
+    }
+  }, [reunion, recargar]);
 
   if (!Number.isFinite(reunionId) || reunionId <= 0) {
     return (
-      <div className="minuta-page">
+      <div className="page minuta-page">
         <p className="error">Reunión inválida.</p>
         <Link to="/minuta">Volver al listado</Link>
       </div>
@@ -231,16 +265,24 @@ export default function MinutaReunionPage() {
   }
 
   return (
-    <div className="minuta-page">
+    <div className="page minuta-page">
       <header className="page-header">
         <p className="minuta-back">
           <Link to="/minuta">← Reuniones</Link>
         </p>
         <h1>{reunion?.titulo || "Minuta de reunión"}</h1>
         <p className="sub">
-          Los cambios se guardan en cache hasta enviar el mail. Las consultas se persisten al
-          escribir.
+          Los cambios se guardan en el servidor al editar (visibles en todas las PC). El mail usa
+          esas novedades al enviar.
         </p>
+        <label className="minuta-ind-switch">
+          <input
+            type="checkbox"
+            checked={verIndicadores}
+            onChange={(e) => setVerIndicadores(e.target.checked)}
+          />
+          <span className="minuta-ind-switch-label">Indicadores</span>
+        </label>
       </header>
 
       {mensaje && (
@@ -256,31 +298,10 @@ export default function MinutaReunionPage() {
 
       {reunionVacia && (
         <div className="minuta-section" role="status">
-          <p className="error">
-            Esta reunión no tiene ítems en el servidor. Si los borraste o migramos una reunión, los
-            pedidos suelen estar en el Histórico del sector.
+          <p className="minuta-hint">
+            Esta reunión todavía no tiene ítems. Usá <strong>+ Pedido</strong> para cargar el
+            primero.
           </p>
-          {historicoOrigen ? (
-            <p className="minuta-hint">
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={recuperando}
-                onClick={() => void recuperarDesdeHistorico()}
-              >
-                {recuperando
-                  ? "Recuperando…"
-                  : `Traer pedidos de «${historicoOrigen.titulo}»`}
-              </button>{" "}
-              o{" "}
-              <Link to={`/minuta/${historicoOrigen.id}`}>abrir el Histórico</Link> y enviar desde
-              ahí.
-            </p>
-          ) : (
-            <p className="minuta-hint">
-              En el listado abrí <strong>Históricos</strong> y entrá al del sector.
-            </p>
-          )}
         </div>
       )}
 
@@ -292,7 +313,11 @@ export default function MinutaReunionPage() {
             <input
               type="text"
               value={sesion.sectoresComprometidos}
-              onChange={(e) => setSesionParcial({ sectoresComprometidos: e.target.value })}
+              onChange={(e) => {
+                const v = e.target.value;
+                setSesionParcial({ sectoresComprometidos: v });
+                persistirMetaReunion({ sectores_comprometidos: v });
+              }}
               placeholder="Ej: Mantenimiento - Compras"
             />
           </label>
@@ -301,14 +326,90 @@ export default function MinutaReunionPage() {
             <input
               type="date"
               value={sesion.fecha}
-              onChange={(e) => setSesionParcial({ fecha: e.target.value })}
+              onChange={(e) => {
+                const v = e.target.value;
+                setSesionParcial({ fecha: v });
+                persistirMetaReunion({ fecha: v });
+              }}
             />
           </label>
         </div>
       </section>
 
+      {/* Export / Import + columnas ocultables + selección parcial */}
+      <section className="minuta-section">
+        <h2>Exportar para Compras</h2>
+        <p className="sub">
+          Exporta un Excel legible (auto-ancho por contenido, wrap, solo columna Novedades editable, orden preservado). Podés ocultar columnas para que no quede ancho/comprimido.
+        </p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
+          <button type="button" className="btn-primary" disabled={exportando || cargando} onClick={() => void handleExportarExcel()}>
+            {exportando ? "Exportando…" : "Exportar Excel"}
+          </button>
+          <label className="btn-ghost btn-sm" style={{ cursor: "pointer" }}>
+            {importandoNovedades ? "Importando…" : "Importar Novedades"}
+            <input
+              type="file"
+              accept=".xlsx,.xlsm"
+              hidden
+              disabled={importandoNovedades}
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                if (f) void handleImportarNovedades(f);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          <button type="button" className="btn-ghost btn-sm" onClick={() => setMostrarColumnas((v) => !v)}>
+            {mostrarColumnas ? "Ocultar columnas ▲" : "Elegir columnas ▼"}
+          </button>
+          {pedidosActivos.length > 0 && (
+            <button type="button" className="btn-ghost btn-sm" onClick={toggleSeleccionarTodoExport}>
+              {idsExport.size === pedidosActivos.length ? "Deseleccionar todo" : "Seleccionar todo para export"}
+            </button>
+          )}
+        </div>
+        {mostrarColumnas && (
+          <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {COLUMNAS_OPCIONES.map((c) => (
+              <label key={c.key} style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={colsVisibles.includes(c.key)}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setColsVisibles((prev) => {
+                      if (checked) return [...prev, c.key];
+                      return prev.filter((k) => k !== c.key);
+                    });
+                  }}
+                />
+                {c.label}
+              </label>
+            ))}
+            <button
+              type="button"
+              className="btn-ghost btn-sm"
+              onClick={() => setColsVisibles(COLUMNAS_OPCIONES.map((c) => c.key))}
+            >
+              Todas
+            </button>
+            <button
+              type="button"
+              className="btn-ghost btn-sm"
+              onClick={() => setColsVisibles(["n_pedido", "pedido", "estado", "ultima_novedad"])}
+            >
+              Solo clave
+            </button>
+          </div>
+        )}
+        {idsExport.size > 0 && <p className="minuta-hint" style={{ marginTop: 8 }}>{idsExport.size} pedidos seleccionados para exportar (vacío = todos).</p>}
+      </section>
+
       {cargando ? (
         <p className="minuta-hint">Cargando pedidos…</p>
+      ) : verIndicadores ? (
+        <VistaIndicadores pedidos={pedidosActivos} />
       ) : (
         <>
           <TablaPedidosReunion
@@ -326,12 +427,13 @@ export default function MinutaReunionPage() {
             onEliminar={ejecutarEliminar}
             onReordenar={reordenarLocal}
             onAdd={addPedido}
+            idsExport={idsExport}
+            onToggleExport={toggleExportId}
+            columnasVisibles={colsVisibles}
           />
 
           <details className="minuta-finalizados">
-            <summary>
-              Finalizados ({pedidosFinalizados.length})
-            </summary>
+            <summary>Finalizados ({pedidosFinalizados.length})</summary>
             <TablaPedidosReunion
               pedidos={pedidosFinalizados}
               fechaReunion={sesion.fecha}
@@ -366,7 +468,11 @@ export default function MinutaReunionPage() {
         onLimpiar={limpiarDestinatarios}
       />
 
-      <EnviarMinutaBar enviando={enviando} onEnviar={enviar} onAbandonar={abandonar} />
+      <EnviarMinutaBar
+        enviando={enviando}
+        onEnviar={() => void enviar()}
+        onAbandonar={abandonar}
+      />
     </div>
   );
 }

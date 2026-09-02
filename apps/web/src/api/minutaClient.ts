@@ -67,6 +67,12 @@ export function labelImportancia(v: string): string {
   return IMPORTANCIAS.find((i) => i.value === v)?.label ?? "Normal";
 }
 
+/** Orden de negocio: Crítico → Urgente → Normal (menor = más prioritario). */
+export function rankImportancia(v: string): number {
+  const idx = IMPORTANCIAS.findIndex((i) => i.value === v);
+  return idx >= 0 ? idx : IMPORTANCIAS.length;
+}
+
 export function labelEstado(v: string): string {
   return ESTADOS.find((e) => e.value === v)?.label ?? "En proceso";
 }
@@ -88,15 +94,27 @@ export type Pedido = {
   importancia: Importancia;
   estado: EstadoItem;
   orden: number;
+  fecha_esperada?: string | null;
   ultima_novedad?: string | null;
   ultima_novedad_fecha?: string | null;
+  novedad_actual?: string | null;
   total_novedades?: number;
   novedades?: Novedad[];
   movimientos?: MovimientoPedido[];
 };
 
 export type PedidoPatch = Partial<
-  Pick<Pedido, "pedido" | "n_pedido" | "fecha" | "oc" | "consultas" | "importancia" | "estado">
+  Pick<
+    Pedido,
+    | "pedido"
+    | "n_pedido"
+    | "fecha"
+    | "oc"
+    | "consultas"
+    | "importancia"
+    | "estado"
+    | "fecha_esperada"
+  >
 >;
 
 export type Novedad = {
@@ -232,6 +250,18 @@ export async function agregarNovedad(
   return data.pedido;
 }
 
+/** Upsert novedad de la fecha de reunion (fuente de verdad para sync multi-PC). */
+export async function upsertNovedad(
+  pedidoId: number,
+  payload: { fecha_reunion: string; texto: string },
+): Promise<Pedido> {
+  const data = await fetchJson<{ pedido: Pedido }>(
+    `/api/minuta/pedidos/${pedidoId}/novedades`,
+    { method: "PUT", body: JSON.stringify(payload) },
+  );
+  return data.pedido;
+}
+
 export async function finalizarPedido(
   pedidoId: number,
   payload: { fecha?: string; notas?: string } = {},
@@ -351,4 +381,49 @@ export async function fetchNovedadesReunion(
     `/api/minuta/novedades-reunion?${q}`,
   );
   return data.novedades;
+}
+
+export async function exportarMinutaExcel(
+  reunionId: number,
+  opts?: { ids?: number[]; cols?: string[] },
+): Promise<Blob> {
+  const q = new URLSearchParams();
+  if (opts?.ids?.length) q.set("ids", opts.ids.join(","));
+  if (opts?.cols?.length) q.set("cols", opts.cols.join(","));
+  const qs = q.toString() ? `?${q}` : "";
+  const url = `${BASE}/api/minuta/reuniones/${reunionId}/exportar-excel${qs}`;
+  const res = await fetch(url, { method: "GET" });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const detail = typeof data.detail === "string" ? data.detail : `Error ${res.status}`;
+    throw new Error(detail);
+  }
+  return await res.blob();
+}
+
+export function descargarBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export async function importarNovedadesMinuta(
+  reunionId: number,
+  file: File,
+): Promise<{ procesadas: number; omitidas_duplicadas: number; pendientes_consulta: number; no_reconocidas: number; total_leidas: number; total_importadas: number }> {
+  const fd = new FormData();
+  fd.append("archivo", file);
+  const url = `${BASE}/api/minuta/reuniones/${reunionId}/importar-novedades`;
+  const res = await fetch(url, { method: "POST", body: fd });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = typeof data.detail === "string" ? data.detail : `Error ${res.status}`;
+    throw new Error(detail);
+  }
+  return data as { procesadas: number; omitidas_duplicadas: number; pendientes_consulta: number; no_reconocidas: number; total_leidas: number; total_importadas: number };
 }

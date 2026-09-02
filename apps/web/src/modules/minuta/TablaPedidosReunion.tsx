@@ -1,7 +1,9 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   ESTADOS,
   IMPORTANCIAS,
+  fetchPedido,
+  rankImportancia,
   type EstadoItem,
   type Importancia,
   type Pedido,
@@ -25,9 +27,20 @@ type Props = {
   onEliminar: (id: number) => Promise<void>;
   onReordenar?: (idsOrdenados: number[]) => void;
   onAdd?: () => void;
+  idsExport?: Set<number>;
+  onToggleExport?: (id: number, checked: boolean) => void;
+  columnasVisibles?: string[];
 };
 
-type SortKey = "orden" | "fecha" | "n_pedido" | "oc" | "pedido" | "importancia" | "estado";
+type SortKey =
+  | "orden"
+  | "fecha"
+  | "n_pedido"
+  | "oc"
+  | "fecha_esperada"
+  | "pedido"
+  | "importancia"
+  | "estado";
 
 export default function TablaPedidosReunion({
   pedidos,
@@ -45,6 +58,9 @@ export default function TablaPedidosReunion({
   onEliminar,
   onReordenar,
   onAdd,
+  idsExport,
+  onToggleExport,
+  columnasVisibles,
 }: Props) {
   const [busqueda, setBusqueda] = useState("");
   const [filtroImp, setFiltroImp] = useState<string>("");
@@ -59,7 +75,8 @@ export default function TablaPedidosReunion({
   const numCols =
     (modo === "activos" ? 1 : 0) + // drag
     (modo === "activos" && onVisto ? 1 : 0) + // visto
-    10;
+    (idsExport ? 1 : 0) + // export selección
+    11;
 
   const filtrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
@@ -80,6 +97,13 @@ export default function TablaPedidosReunion({
         if (cmp !== 0) return sortAsc ? cmp : -cmp;
         return (b.id || 0) - (a.id || 0);
       }
+      if (sortKey === "importancia") {
+        const cmp = rankImportancia(a.importancia) - rankImportancia(b.importancia);
+        if (cmp !== 0) return sortAsc ? cmp : -cmp;
+        const porOrden = (Number(a.orden) || 0) - (Number(b.orden) || 0);
+        if (porOrden !== 0) return porOrden;
+        return (b.id || 0) - (a.id || 0);
+      }
       const av = String(a[sortKey] ?? "");
       const bv = String(b[sortKey] ?? "");
       const cmp = av.localeCompare(bv, "es", { numeric: true });
@@ -87,6 +111,8 @@ export default function TablaPedidosReunion({
     });
     return list;
   }, [pedidos, busqueda, filtroImp, filtroEst, sortKey, sortAsc]);
+
+  const isVisible = (key: string) => !columnasVisibles || columnasVisibles.includes(key);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortAsc((v) => !v);
@@ -190,39 +216,71 @@ export default function TablaPedidosReunion({
                   ✓
                 </th>
               )}
-              <th>
-                <button type="button" className="minuta-th-btn" onClick={() => toggleSort("fecha")}>
-                  Fecha solicitud
-                </button>
-              </th>
-              <th>
-                <button type="button" className="minuta-th-btn" onClick={() => toggleSort("n_pedido")}>
-                  Nº solicitud
-                </button>
-              </th>
-              <th>
-                <button type="button" className="minuta-th-btn" onClick={() => toggleSort("oc")}>
-                  Nº OC
-                </button>
-              </th>
-              <th>
-                <button type="button" className="minuta-th-btn" onClick={() => toggleSort("pedido")}>
-                  Descripción
-                </button>
-              </th>
-              <th>Última novedad</th>
-              <th>Consultas</th>
-              <th>Novedades nueva reunión ({fmtFecha(fechaReunion)})</th>
-              <th>
-                <button type="button" className="minuta-th-btn" onClick={() => toggleSort("importancia")}>
-                  Importancia
-                </button>
-              </th>
-              <th>
-                <button type="button" className="minuta-th-btn" onClick={() => toggleSort("estado")}>
-                  Estado
-                </button>
-              </th>
+              {idsExport && onToggleExport && (
+                <th className="minuta-col-export" title="Seleccionar para exportar a Compras">
+                  <input
+                    type="checkbox"
+                    checked={idsExport.size === pedidos.length && pedidos.length > 0}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      pedidos.forEach((p) => onToggleExport(p.id, checked));
+                    }}
+                    title="Seleccionar todo para export"
+                  />
+                </th>
+              )}
+              {isVisible("fecha") && (
+                <th>
+                  <button type="button" className="minuta-th-btn" onClick={() => toggleSort("fecha")}>
+                    Fecha solicitud
+                  </button>
+                </th>
+              )}
+              {isVisible("n_pedido") && (
+                <th>
+                  <button type="button" className="minuta-th-btn" onClick={() => toggleSort("n_pedido")}>
+                    Nº solicitud
+                  </button>
+                </th>
+              )}
+              {isVisible("oc") && (
+                <th>
+                  <button type="button" className="minuta-th-btn" onClick={() => toggleSort("oc")}>
+                    Nº OC
+                  </button>
+                </th>
+              )}
+              {isVisible("fecha_esperada") && (
+                <th>
+                  <button type="button" className="minuta-th-btn" onClick={() => toggleSort("fecha_esperada")}>
+                    Fecha esperada
+                  </button>
+                </th>
+              )}
+              {isVisible("pedido") && (
+                <th>
+                  <button type="button" className="minuta-th-btn" onClick={() => toggleSort("pedido")}>
+                    Descripción
+                  </button>
+                </th>
+              )}
+              {isVisible("ultima_novedad") && <th>Última novedad</th>}
+              {isVisible("consultas") && <th>Consultas</th>}
+              {isVisible("novedad_actual") && <th>Novedades nueva reunión ({fmtFecha(fechaReunion)})</th>}
+              {isVisible("importancia") && (
+                <th>
+                  <button type="button" className="minuta-th-btn" onClick={() => toggleSort("importancia")}>
+                    Importancia
+                  </button>
+                </th>
+              )}
+              {isVisible("estado") && (
+                <th>
+                  <button type="button" className="minuta-th-btn" onClick={() => toggleSort("estado")}>
+                    Estado
+                  </button>
+                </th>
+              )}
               <th aria-label="Acciones" />
             </tr>
           </thead>
@@ -292,93 +350,132 @@ export default function TablaPedidosReunion({
                         />
                       </td>
                     )}
-                    <td>
-                      <input
-                        type="date"
-                        value={p.fecha}
-                        onChange={(e) => onCampo(p.id, { fecha: e.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={p.n_pedido}
-                        onChange={(e) => onCampo(p.id, { n_pedido: e.target.value })}
-                        placeholder="Nº solicitud"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={p.oc}
-                        onChange={(e) => onCampo(p.id, { oc: e.target.value })}
-                        placeholder="Nº OC"
-                      />
-                    </td>
-                    <td>
-                      <textarea
-                        className="minuta-desc-input"
-                        rows={2}
-                        value={p.pedido}
-                        onChange={(e) => onCampo(p.id, { pedido: e.target.value })}
-                        placeholder="Descripción"
-                      />
-                    </td>
-                    <td className="minuta-td-ultima">
-                      {ultimaNovedad ? (
-                        <span className="minuta-ultima-novedad" title={ultimaNovedad}>
-                          {ultimaNovedad}
-                        </span>
-                      ) : (
-                        <span className="minuta-hint">—</span>
-                      )}
-                    </td>
-                    <td>
-                      <textarea
-                        className="minuta-consultas-input"
-                        rows={2}
-                        value={p.consultas ?? ""}
-                        onChange={(e) => onCampo(p.id, { consultas: e.target.value })}
-                        placeholder="Consultas…"
-                      />
-                    </td>
-                    <td>
-                      <textarea
-                        className="minuta-novedad-input"
-                        rows={2}
-                        value={borrador}
-                        onChange={(e) => onBorrador(p.id, e.target.value)}
-                        placeholder={`Novedades del ${fmtFecha(fechaReunion)}…`}
-                      />
-                    </td>
-                    <td>
-                      <select
-                        className={`minuta-select minuta-imp-${p.importancia}`}
-                        value={p.importancia}
-                        onChange={(e) =>
-                          onCampo(p.id, { importancia: e.target.value as Importancia })
-                        }
-                      >
-                        {IMPORTANCIAS.map((i) => (
-                          <option key={i.value} value={i.value}>
-                            {i.label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <select
-                        className={`minuta-select minuta-estado-${p.estado}`}
-                        value={p.estado}
-                        onChange={(e) =>
-                          onCampo(p.id, { estado: e.target.value as EstadoItem })
-                        }
-                      >
-                        {ESTADOS.map((e) => (
-                          <option key={e.value} value={e.value}>
-                            {e.label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
+                    {idsExport && onToggleExport && (
+                      <td className="minuta-col-export">
+                        <input
+                          type="checkbox"
+                          checked={idsExport.has(p.id)}
+                          title="Incluir en export a Compras"
+                          aria-label={`Exportar: ${label}`}
+                          onChange={(e) => onToggleExport(p.id, e.target.checked)}
+                        />
+                      </td>
+                    )}
+                    {isVisible("fecha") && (
+                      <td>
+                        <input
+                          type="date"
+                          value={p.fecha}
+                          onChange={(e) => onCampo(p.id, { fecha: e.target.value })}
+                        />
+                      </td>
+                    )}
+                    {isVisible("n_pedido") && (
+                      <td>
+                        <input
+                          value={p.n_pedido}
+                          onChange={(e) => onCampo(p.id, { n_pedido: e.target.value })}
+                          placeholder="Nº solicitud"
+                        />
+                      </td>
+                    )}
+                    {isVisible("oc") && (
+                      <td>
+                        <input
+                          value={p.oc}
+                          onChange={(e) => onCampo(p.id, { oc: e.target.value })}
+                          placeholder="Nº OC"
+                        />
+                      </td>
+                    )}
+                    {isVisible("fecha_esperada") && (
+                      <td>
+                        <input
+                          type="date"
+                          value={p.fecha_esperada ?? ""}
+                          onChange={(e) => onCampo(p.id, { fecha_esperada: e.target.value || null })}
+                          title="Fecha esperada de entrega"
+                        />
+                      </td>
+                    )}
+                    {isVisible("pedido") && (
+                      <td>
+                        <textarea
+                          className="minuta-desc-input"
+                          rows={2}
+                          value={p.pedido}
+                          onChange={(e) => onCampo(p.id, { pedido: e.target.value })}
+                          placeholder="Descripción"
+                        />
+                      </td>
+                    )}
+                    {isVisible("ultima_novedad") && (
+                      <td className="minuta-td-ultima">
+                        {ultimaNovedad ? (
+                          <span className="minuta-ultima-novedad" title={ultimaNovedad}>
+                            {ultimaNovedad}
+                          </span>
+                        ) : (
+                          <span className="minuta-hint">—</span>
+                        )}
+                      </td>
+                    )}
+                    {isVisible("consultas") && (
+                      <td>
+                        <textarea
+                          className="minuta-consultas-input"
+                          rows={2}
+                          value={p.consultas ?? ""}
+                          onChange={(e) => onCampo(p.id, { consultas: e.target.value })}
+                          placeholder="Consultas…"
+                        />
+                      </td>
+                    )}
+                    {isVisible("novedad_actual") && (
+                      <td>
+                        <textarea
+                          className="minuta-novedad-input"
+                          rows={2}
+                          value={borrador}
+                          onChange={(e) => onBorrador(p.id, e.target.value)}
+                          placeholder={`Novedades del ${fmtFecha(fechaReunion)}…`}
+                        />
+                      </td>
+                    )}
+                    {isVisible("importancia") && (
+                      <td>
+                        <select
+                          className={`minuta-select minuta-imp-${p.importancia}`}
+                          value={p.importancia}
+                          onChange={(e) =>
+                            onCampo(p.id, { importancia: e.target.value as Importancia })
+                          }
+                        >
+                          {IMPORTANCIAS.map((i) => (
+                            <option key={i.value} value={i.value}>
+                              {i.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                    )}
+                    {isVisible("estado") && (
+                      <td>
+                        <select
+                          className={`minuta-select minuta-estado-${p.estado}`}
+                          value={p.estado}
+                          onChange={(e) =>
+                            onCampo(p.id, { estado: e.target.value as EstadoItem })
+                          }
+                        >
+                          {ESTADOS.map((e) => (
+                            <option key={e.value} value={e.value}>
+                              {e.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                    )}
                     <td className="minuta-acciones">
                       <button
                         type="button"
@@ -450,13 +547,47 @@ export default function TablaPedidosReunion({
 }
 
 function HistorialPedido({ pedido }: { pedido: Pedido }) {
-  const novedades = pedido.novedades ?? [];
-  const movimientos = pedido.movimientos ?? [];
+  const [novedades, setNovedades] = useState<Pedido["novedades"]>(pedido.novedades);
+  const [movimientos, setMovimientos] = useState<Pedido["movimientos"]>(pedido.movimientos);
+  const [cargandoHist, setCargandoHist] = useState(
+    !(pedido.novedades && pedido.novedades.length > 0),
+  );
 
-  if (novedades.length === 0 && movimientos.length === 0) {
+  useEffect(() => {
+    let alive = true;
+    setCargandoHist(true);
+    fetchPedido(pedido.id)
+      .then((detalle) => {
+        if (!alive) return;
+        setNovedades(detalle.novedades ?? []);
+        setMovimientos(detalle.movimientos ?? []);
+      })
+      .catch(() => {
+        if (alive) {
+          setNovedades(pedido.novedades ?? []);
+          setMovimientos(pedido.movimientos ?? []);
+        }
+      })
+      .finally(() => {
+        if (alive) setCargandoHist(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [pedido.id]);
+
+  const novs = novedades ?? [];
+  const movs = movimientos ?? [];
+
+  if (cargandoHist) {
+    return <p className="minuta-hint minuta-historial">Cargando historial…</p>;
+  }
+
+  if (novs.length === 0 && movs.length === 0) {
     return (
       <p className="minuta-hint minuta-historial">
-        Sin novedades previas. Las que se envíen por mail aparecerán acá.
+        Sin novedades previas. Las de reuniones anteriores aparecen acá al expandir; las de la
+        fecha actual se editan en la columna Novedades.
       </p>
     );
   }
@@ -464,9 +595,9 @@ function HistorialPedido({ pedido }: { pedido: Pedido }) {
   return (
     <div className="minuta-historial">
       <h4>Historial del pedido</h4>
-      {movimientos.length > 0 && (
+      {movs.length > 0 && (
         <ul className="minuta-movimientos">
-          {movimientos.map((m) => (
+          {movs.map((m) => (
             <li key={m.id}>
               <span className="minuta-mov-badge">
                 {m.sector_origen} → {m.sector_destino}
@@ -477,9 +608,9 @@ function HistorialPedido({ pedido }: { pedido: Pedido }) {
           ))}
         </ul>
       )}
-      {novedades.length > 0 && (
+      {novs.length > 0 && (
         <ul className="minuta-novedades-list">
-          {novedades.map((n) => (
+          {novs.map((n) => (
             <li key={n.id}>
               <strong>Novedades del {fmtFecha(n.fecha_reunion)}</strong>
               <span className="minuta-novedad-sector"> ({n.sector})</span>
