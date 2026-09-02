@@ -153,32 +153,6 @@ export type NotaFila = {
   creado_en: string;
 };
 
-export type ExportRow = {
-  cant_articulos_pedido: string;
-  solicitante: string;
-  tipo_solicitud: string;
-  maquina_linea: string;
-  fecha_solicitud: string;
-  num_odoo: string;
-  almacenista: string;
-  num_solicitud: string;
-  codigo: string;
-  descripcion: string;
-  cantidad: string;
-  unidad: string;
-  precio: string;
-  total: string;
-  moneda: string;
-  proveedor: string;
-  oc_rq: string;
-  fecha_oc: string;
-  comprador: string;
-  fecha_envio_compras: string;
-  estado_item: string;
-  estado_solicitud: string;
-  novedades: string;
-};
-
 export const URGENCIA_OPCIONES: { value: Urgencia; label: string }[] = [
   { value: "baja", label: "Baja" },
   { value: "media", label: "Media" },

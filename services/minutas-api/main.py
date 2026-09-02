@@ -4,20 +4,17 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import os
 import smtplib
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, status, Query
+from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
 
 import repo
 import repo_import
-import openpyxl
-from excel_parser import parsear_excel, exportar_excel, FilaPedido, _ref_pedido
+from excel_parser import parsear_excel
 from mail_builder import construir_mail_minuta_excel
 from email_service import (
     EmailNoConfigurado,
@@ -255,8 +252,6 @@ async def importar_excel(sesion_id: int, archivo: UploadFile = File(...)):
             archivo.filename,
             hoja,
             filas,
-            False,
-            raw,
         )
         return meta
     except LookupError as e:
@@ -270,176 +265,6 @@ async def importar_excel(sesion_id: int, archivo: UploadFile = File(...)):
 @app.get("/sesiones/{sesion_id}/pedidos", tags=["import"])
 def listar_pedidos(sesion_id: int, solo_elegibles: bool = True):
     return repo_import.listar_pedidos_agrupados(sesion_id, solo_elegibles=solo_elegibles)
-
-
-@app.get("/sesiones/{sesion_id}/exportar-excel", tags=["export"])
-def exportar_excel_endpoint(
-    sesion_id: int,
-    refs: list[str] | None = Query(None),
-    cols: list[str] | None = Query(None),
-):
-    sesion = repo.obtener_sesion_detalle(sesion_id)
-    if not sesion:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Sesión no encontrada.")
-    if sesion.estado.value == "enviada":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="No se puede exportar una sesión enviada.")
-
-    source_bytes = repo_import.obtener_source_bytes(sesion_id)
-    filas = repo_import.listar_filas(sesion_id, order_by_fila_excel=True)
-    if refs:
-        filas = [f for f in filas if f["ref_pedido"] in refs]
-    selected_refs = [f["ref_pedido"] for f in filas] if filas else None
-
-    # Si no hay source_bytes (sesión vieja), generar desde filas DB
-    if source_bytes is None and filas:
-        output = exportar_excel(None, selected_refs=selected_refs, cols=cols, filas_db=filas)
-    elif source_bytes is None:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND, detail="No se encontró archivo de importación para esta sesión."
-        )
-    else:
-        # Si tenemos filas filtradas, pasar filas_db para evitar re-parsear todo el archivo
-        if filas is not None:
-            output = exportar_excel(source_bytes, selected_refs=selected_refs, cols=cols, filas_db=filas)
-        else:
-            output = exportar_excel(source_bytes, selected_refs=selected_refs, cols=cols)
-
-    filename = f"Minuta_{sesion.semana_iso}_{sesion.fecha}.xlsx"
-    # Sanitize filename for header
-    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in filename)
-    return StreamingResponse(
-        output,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{safe}"'},
-    )
-
-
-@app.post("/sesiones/{sesion_id}/importar-novedades", tags=["import"])
-async def importar_novedades(sesion_id: int, archivo: UploadFile = File(...)):
-    sesion = repo.obtener_sesion_detalle(sesion_id)
-    if not sesion:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Sesión no encontrada.")
-    if sesion.estado.value == "enviada":
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN, detail="No se puede importar novedades en una sesión enviada."
-        )
-    if not archivo.filename or not archivo.filename.lower().endswith((".xlsx", ".xlsm", ".xls")):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Formato no soportado. Use .xlsx")
-
-    raw = await archivo.read()
-
-    try:
-        wb = openpyxl.load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
-        if "Novedades" not in wb.sheetnames:
-            wb.close()
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST, detail="No se encontró la hoja 'Novedades' en el archivo."
-            )
-
-        ws = wb["Novedades"]
-        # Leer encabezados para mapear columnas por nombre (soporta export secuencial o con gaps)
-        header_row = None
-        for row in ws.iter_rows(min_row=1, max_row=1, values_only=True):
-            header_row = row
-            break
-        if header_row is None:
-            wb.close()
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Hoja 'Novedades' vacía.")
-
-        # Normalizar headers a índice
-        header_map: dict[str, int] = {}
-        for idx, h in enumerate(header_row):
-            if h:
-                header_map[str(h).strip().lower()] = idx
-
-        # Índices por nombre, con fallback a posiciones secuenciales del export
-        idx_novedades = header_map.get("novedades", header_map.get("novedad", header_map.get("actualización reunión", 22)))
-        idx_num_odoo = header_map.get("num_odoo", header_map.get("num odoo", 5))
-        idx_num_solicitud = header_map.get("num_solicitud", header_map.get("num solicitud", 7))
-        # fila_excel oculto está en AA/header "fila_excel" (col 27 -> idx 26)
-        idx_fila_excel = header_map.get("fila_excel", header_map.get("fila", 26))
-
-        filas: list[FilaPedido] = []
-
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if not row:
-                continue
-            def get_cell(idx: int | None) -> str:
-                if idx is None or idx >= len(row):
-                    return ""
-                v = row[idx]
-                return str(v).strip() if v is not None else ""
-
-            num_odoo = get_cell(idx_num_odoo if isinstance(idx_num_odoo, int) else None)
-            num_solicitud = get_cell(idx_num_solicitud if isinstance(idx_num_solicitud, int) else None)
-            novedades = get_cell(idx_novedades if isinstance(idx_novedades, int) else None)
-            raw_fila_excel_val = row[idx_fila_excel] if isinstance(idx_fila_excel, int) and idx_fila_excel < len(row) else None
-            try:
-                fila_excel = int(raw_fila_excel_val) if raw_fila_excel_val is not None and str(raw_fila_excel_val).strip() != "" else 0
-            except (ValueError, TypeError):
-                fila_excel = 0
-
-            ref_pedido = _ref_pedido(num_odoo, num_solicitud)
-            if not ref_pedido and not novedades.strip():
-                continue
-
-            filas.append(
-                FilaPedido(
-                    fila_excel=fila_excel,
-                    cant_articulos_pedido="",
-                    solicitante="",
-                    tipo_solicitud="",
-                    maquina_linea="",
-                    fecha_solicitud="",
-                    ref_pedido=ref_pedido,
-                    num_odoo=num_odoo,
-                    num_solicitud=num_solicitud,
-                    almacenista="",
-                    codigo="",
-                    descripcion="",
-                    cantidad="",
-                    unidad="",
-                    precio="",
-                    total="",
-                    moneda="",
-                    proveedor="",
-                    oc_rq="",
-                    fecha_oc="",
-                    comprador="",
-                    fecha_envio_compras="",
-                    estado_item="",
-                    estado_solicitud="",
-                    cumplida=False,
-                    elegible_reunion=True,
-                    novedades=novedades,
-                )
-            )
-
-        wb.close()
-
-        if not filas:
-            return {
-                "procesadas": 0,
-                "omitidas_duplicadas": 0,
-                "pendientes_consulta": 0,
-                "no_reconocidas": 0,
-                "total_importadas": 0,
-            }
-
-        meta = await asyncio.to_thread(
-            repo_import.guardar_importacion,
-            sesion_id,
-            archivo.filename,
-            "Novedades",
-            filas,
-            True,
-            raw,
-        )
-        return meta
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Error leyendo Novedades: {e}") from e
 
 
 @app.put("/sesiones/{sesion_id}/seleccion-reunion", tags=["import"])
@@ -467,14 +292,6 @@ def nota_fila(sesion_id: int, fila_id: int, body: ActualizacionCreate):
         return repo_import.agregar_nota_fila(sesion_id, fila_id, body.texto, body.autor)
     except LookupError as e:
         raise _http_from_lookup(e) from e
-
-
-@app.get("/sesiones/{sesion_id}/consultas-pendientes", tags=["import"])
-def listar_consultas(sesion_id: int):
-    sesion = repo.obtener_sesion_detalle(sesion_id)
-    if not sesion:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Sesión no encontrada.")
-    return repo_import.listar_consultas_pendientes(sesion_id)
 
 
 @app.get("/sesiones/{sesion_id}/preview-email", response_model=PreviewEmailResponse, tags=["email"])
