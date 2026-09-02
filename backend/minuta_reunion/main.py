@@ -334,6 +334,7 @@ def _generar_excel_minuta(reunion: dict, pedidos: list[dict], visible_cols: list
     ws.title = "Minuta"
 
     header_fill = PatternFill("solid", fgColor="1F4E78")
+    header_fill_editable = PatternFill("solid", fgColor="059669")
     header_font = Font(color="FFFFFF", bold=True, size=10)
     header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
     thin_border = Border(
@@ -344,11 +345,15 @@ def _generar_excel_minuta(reunion: dict, pedidos: list[dict], visible_cols: list
     )
     wrap_align = Alignment(vertical="center", wrap_text=True)
     center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    # Paleta pálida para importancia (no molestar visual)
+    fill_critico = PatternFill("solid", fgColor="FECACA")
+    fill_urgente = PatternFill("solid", fgColor="FEF3C7")
 
-    # Escribir headers
+    # Escribir headers — editable con color distintivo
     for col_idx, header in enumerate(headers, start=1):
         cell = ws.cell(row=1, column=col_idx, value=header)
-        cell.fill = header_fill
+        is_editable_header = header == _NOVEDADES_COL_HEADER
+        cell.fill = header_fill_editable if is_editable_header else header_fill
         cell.font = header_font
         cell.alignment = header_align
         cell.border = thin_border
@@ -379,6 +384,13 @@ def _generar_excel_minuta(reunion: dict, pedidos: list[dict], visible_cols: list
                 cell.alignment = center_align
             # Fuente legible
             cell.font = Font(size=10)
+            # Color pálido para importancia (crítico/urgente)
+            if key == "importancia":
+                vnorm = str(val).strip().lower()
+                if vnorm == "critico":
+                    cell.fill = fill_critico
+                elif vnorm == "urgente":
+                    cell.fill = fill_urgente
         # ID oculto para re-import
         id_cell = ws.cell(row=1 + len(pedidos) + 1, column=1)  # dummy to keep col count? actually need per row
         # Correct: pedido_id hidden at last column per row

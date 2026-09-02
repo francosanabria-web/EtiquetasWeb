@@ -59,3 +59,8 @@ Chain strategy: stacked-to-main
 - [x] 5.2 Selector filas export solo visible al desplegar "Exportar" (`exportAbierto ? idsExport : undefined`) — evita confusión con checklist visto; alternativa consultada y resuelta con este condicional
 - [x] 5.3 Bug historial: `table-layout: fixed`, `numCols` dinámico por `columnasVisibles`, `colSpan` corregido, `minuta-historial-row` con `padding:0` y scroll interno — ya no pone loca la página ni borra anchos
 - [x] 5.4 Altura fila agrandable/achicable y fija: `resize: vertical` en textareas + botones ＋/－ por fila + persistencia `localStorage` `minuta-alturas` + `tr` style height + CSS `min-height:60` `max-height:200`
+
+## Phase 6: Excel formatting (pedido 2026-09-02 — formato)
+
+- [x] 6.1 Importancia con color pálido (crítico #FECACA, urgente #FEF3C7, normal sin fill) — respeta color sin molestar visual
+- [x] 6.2 Header editable distintivo (fill #059669 vs #1F4E78 resto) para indicar columna a trabajar
