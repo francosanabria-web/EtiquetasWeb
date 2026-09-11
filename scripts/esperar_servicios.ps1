@@ -8,7 +8,11 @@ $checks = @(
     @{ Name = "KPIs";         Url = "http://127.0.0.1:8001/health" },
     @{ Name = "Minuta";       Url = "http://127.0.0.1:8013/health" },
     @{ Name = "Email";        Url = "http://127.0.0.1:8020/health" },
-    @{ Name = "Solicitudes";  Url = "http://127.0.0.1:8014/health" }
+    @{ Name = "Solicitudes";  Url = "http://127.0.0.1:8014/health" },
+    @{ Name = "Usuarios";     Url = "http://127.0.0.1:8015/health" },
+    @{ Name = "Activos";      Url = "http://127.0.0.1:8016/health" },
+    @{ Name = "Reportes";     Url = "http://127.0.0.1:8017/health" },
+    @{ Name = "Salidas";      Url = "http://127.0.0.1:8018/health" }
 )
 
 $deadline = (Get-Date).AddSeconds($TimeoutSeg)

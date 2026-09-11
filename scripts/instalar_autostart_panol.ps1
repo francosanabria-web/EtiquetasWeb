@@ -1,17 +1,14 @@
 # ============================================================================
-#  instalar_autostart.ps1
-#  Registra una TAREA PROGRAMADA que lanza el supervisor al iniciar sesion,
-#  oculto y reiniciandose solo si falla. Ejecutar UNA sola vez (doble click o
-#  desde PowerShell). NO requiere administrador (corre en tu propia sesion).
-#
-#  La tarea corre "solo cuando el usuario esta logueado" a proposito: asi el
-#  agente tiene acceso a la impresora predeterminada de tu sesion.
+#  instalar_autostart_panol.ps1
+#  Registra la tarea "PortalPanol" que lanza supervisor_panol.ps1 al iniciar
+#  sesion (oculto). NO toca RedImpresionPanol / etiquetas.
+#  Ejecutar UNA vez. No requiere administrador.
 # ============================================================================
 
 $ErrorActionPreference = "Stop"
 
-$TaskName = "RedImpresionPanol"
-$Supervisor = Join-Path $PSScriptRoot "supervisor_impresion.ps1"
+$TaskName = "PortalPanol"
+$Supervisor = Join-Path $PSScriptRoot "supervisor_panol.ps1"
 
 if (-not (Test-Path $Supervisor)) {
   Write-Host "No se encontro el supervisor en: $Supervisor" -ForegroundColor Red
@@ -38,7 +35,9 @@ Register-ScheduledTask -TaskName $TaskName -Action $accion -Trigger $disparador 
 
 Write-Host "Tarea '$TaskName' registrada (se inicia sola al iniciar sesion)." -ForegroundColor Green
 
-# Arrancar ya mismo, sin esperar al proximo inicio de sesion.
 Start-ScheduledTask -TaskName $TaskName
-Write-Host "Supervisor iniciado. En ~30s deberian estar arriba la API, el agente y la web." -ForegroundColor Green
-Write-Host "Para ver el estado:  powershell -ExecutionPolicy Bypass -File `"$PSScriptRoot\estado_impresion.ps1`""
+Write-Host "Supervisor portal iniciado. En ~30-60s deberian responder los backends y :5180." -ForegroundColor Green
+Write-Host "Estado:  powershell -ExecutionPolicy Bypass -File `"$PSScriptRoot\estado_panol.ps1`""
+Write-Host "Frenar:  powershell -ExecutionPolicy Bypass -File `"$PSScriptRoot\detener_panol.ps1`""
+Write-Host ""
+Write-Host "AVISO: no uses INICIAR_TODO.bat mientras esta tarea este activa (mismos puertos)." -ForegroundColor Yellow
