@@ -3,12 +3,13 @@
  */
 
 import { useState, type FormEvent } from "react";
-import { createInventario, type InventarioDetalle, type Personal } from "../../api/cajasClient";
+import { createInventario, type Inventario } from "../../api/cajasClient";
+import { type Personal } from "../../api/personalClient";
 
 type Props = {
   tecnicos: Personal[];
   supervisores: Personal[];
-  onGuardado: (inv: any) => void;
+  onGuardado: (inv: Inventario) => void;
   onCancelar: () => void;
   token: string;
   cargando: boolean;
@@ -27,11 +28,6 @@ export default function InventarioFormModal({ tecnicos, supervisores, onGuardado
 
   const handleAddDetalle = () => {
     setDetalle([...detalle, { herramienta_codigo: "", cantidad: 1, presente: true, observaciones: "" }]);
-  };
-
-  const handleRemoveDetalle = (idx: number) => {
-    if (detalle.length <= 1) return;
-    setDetalle(detalle.filter((_, i) => i !== idx));
   };
 
   const handleDetalleChange = (idx: number, field: string, value: string | number | boolean) => {

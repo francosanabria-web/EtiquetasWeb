@@ -2,13 +2,14 @@
  * InventariosPage — Gestion de inventarios mensuales con header + detalle.
  */
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
 import { permisoDe } from "../../config/navegacion";
 import {
-  getInventarios, getInventarioById, createInventario, updateInventarioEstado, deleteInventario, getPersonal,
-  type Inventario, type Personal,
+  getInventarios, updateInventarioEstado, deleteInventario,
+  type Inventario,
 } from "../../api/cajasClient";
+import { getPersonal, type Personal } from "../../api/personalClient";
 import InventarioFormModal from "./InventarioFormModal";
 
 const PAGE_SIZE = 25;
@@ -69,8 +70,8 @@ export default function InventariosPage() {
     if (!token) return;
     const loadPersonal = async () => {
       try {
-        const tech = await getPersonal(token, { tipo: "tecnico", limit: "100" });
-        const sup = await getPersonal(token, { tipo: "supervisor", limit: "100" });
+        const tech = await getPersonal(token, { tipo: "tecnico", limit: 100 });
+        const sup = await getPersonal(token, { tipo: "supervisor", limit: 100 });
         setTecnicos(tech.items);
         setSupervisores(sup.items);
       } catch { /* ignore */ }

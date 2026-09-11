@@ -235,7 +235,7 @@ export async function getInventarioById(token: string, id: number): Promise<Inve
   return data;
 }
 
-export async function createInventario(token: string, data: Omit<Inventario, "id" | "detalle"> & { detalle: Array<Omit<InventarioDetalle, "id">>>): Promise<Inventario> {
+export async function createInventario(token: string, data: Omit<Inventario, "id" | "detalle"> & { detalle: Array<Omit<InventarioDetalle, "id">> }): Promise<Inventario> {
   const payload = { ...data };
   const result = await fetchJson<Inventario>("/api/cajas/inventarios", {
     method: "POST", body: JSON.stringify(payload),

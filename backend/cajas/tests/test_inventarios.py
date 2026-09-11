@@ -22,18 +22,23 @@ os.environ.setdefault("CAJAS_JWT_SECRET", "panol-secret-key-2024")
 import db
 import service
 import store
+from jose import jwt as jose_jwt
 
 db.init_db()
 
+JWT_SECRET = os.environ.get("CAJAS_JWT_SECRET", "panol-secret-key-2024")
+
 
 def _token():
-    """Retorna token de prueba con permiso cajas:escritura."""
-    return "test-jwt-token-with-cajas-escritura"
+    """Retorna un token JWT real con rol panol (cajas:escritura)."""
+    payload = {"sub": "test", "rol": "panol", "permisos": ["cajas:lectura", "cajas:escritura"]}
+    return jose_jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
 def _token_lectura():
-    """Retorna token de prueba con permiso cajas:lectura."""
-    return "test-jwt-token-with-cajas-lectura"
+    """Retorna un token JWT real con rol supervisor (cajas:lectura)."""
+    payload = {"sub": "test", "rol": "supervisor", "permisos": ["cajas:lectura"]}
+    return jose_jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
 def _setup_caja():
@@ -118,7 +123,7 @@ class TestInventoryCRUD(unittest.TestCase):
             "caja_id": self.caja_id,
             "tecnico_id": tecnico["id"],
             "supervisor_id": supervisor["id"],
-            "periodo": "2026-09-01",
+            "periodo": "2026-08-01",
             "detalle": [{"herramienta_codigo": "INVTOOL001", "cantidad": 1, "presente": True}],
         }
         result = service.create_inventario(_token(), data)
@@ -213,7 +218,7 @@ class TestInventoryCRUD(unittest.TestCase):
             "caja_id": self.caja_id,
             "tecnico_id": tecnico["id"],
             "supervisor_id": supervisor["id"],
-            "periodo": "2026-10-01",
+            "periodo": "2026-07-01",
             "detalle": [{"herramienta_codigo": "INVTOOL001", "cantidad": 1, "presente": True}],
         }
         created = service.create_inventario(_token(), data)
@@ -244,7 +249,7 @@ class TestInventoryCRUD(unittest.TestCase):
             "caja_id": self.caja_id,
             "tecnico_id": tecnico["id"],
             "supervisor_id": supervisor["id"],
-            "periodo": "2026-10-15",
+            "periodo": "2026-06-15",
             "detalle": [{"herramienta_codigo": "INVTOOL001", "cantidad": 1, "presente": True}],
         }
         created = service.create_inventario(_token(), data)
@@ -267,7 +272,7 @@ class TestInventoryCRUD(unittest.TestCase):
             "caja_id": self.caja_id,
             "tecnico_id": tecnico["id"],
             "supervisor_id": supervisor["id"],
-            "periodo": "2026-10-20",
+            "periodo": "2026-05-20",
             "detalle": [{"herramienta_codigo": "INVTOOL001", "cantidad": 1, "presente": True}],
         }
         created = service.create_inventario(_token(), data)
@@ -293,7 +298,7 @@ class TestInventoryCRUD(unittest.TestCase):
             "caja_id": self.caja_id,
             "tecnico_id": tecnico["id"],
             "supervisor_id": supervisor["id"],
-            "periodo": "2026-10-25",
+            "periodo": "2026-04-25",
             "detalle": [{"herramienta_codigo": "INVTOOL001", "cantidad": 1, "presente": True}],
         }
         created = service.create_inventario(_token(), data)
@@ -370,13 +375,13 @@ class TestInventoryCRUD(unittest.TestCase):
             "caja_id": self.caja_id,
             "tecnico_id": tecnico["id"],
             "supervisor_id": supervisor["id"],
-            "periodo": "2026-11-15",
+            "periodo": "2026-03-15",
             "detalle": [{"herramienta_codigo": "INVTOOL001", "cantidad": 3, "presente": True}],
         }
         result = service.create_inventario(_token(), data)
         if isinstance(result, tuple):
             self.skipTest("No se pudo crear inventario de prueba")
-        self.assertEqual(result["periodo"], "2026-11-01")
+        self.assertEqual(result["periodo"], "2026-03-01")
 
     def test_20_area_snapshot(self):
         """Area snapshot proviene de cajas_cajas.ubicacion."""

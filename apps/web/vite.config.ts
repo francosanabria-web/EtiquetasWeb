@@ -78,7 +78,7 @@ const proxyCajas = {
   },
 };
 
-const const serverOpts = {
+const serverOpts = {
   host: true,
   port: 5180,
   allowedHosts: true as const,

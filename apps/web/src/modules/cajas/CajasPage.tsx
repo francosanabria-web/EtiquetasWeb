@@ -2,11 +2,11 @@
  * CajasPage — Módulo completo de gestión de cajas y herramientas con datagrid, filtros y modales.
  */
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
 import { permisoDe } from "../../config/navegacion";
 import {
-  getCajas, getHerramientas, deleteCaja, deleteHerramienta,
+  getCajas, getHerramientas,
   type Caja, type Herramienta,
 } from "../../api/cajasClient";
 import CajasTabla from "./CajasTabla";
@@ -43,7 +43,6 @@ export default function CajasPage() {
   const [selHerramienta, setSelHerramienta] = useState<Herramienta | null>(null);
   const [creandoCaja, setCreandoCaja] = useState(false);
   const [creandoHerramienta, setCreandoHerramienta] = useState(false);
-  const [eliminando, setEliminando] = useState<number | null>(null);
 
   const cargar = useCallback(async () => {
     if (!token || !puedeLeer) return;
@@ -82,36 +81,7 @@ export default function CajasPage() {
     await cargar();
   };
 
-  const handleDeleteCaja = async (id: number) => {
-    if (!window.confirm("¿Desea eliminar esta caja? (Se requiere que no tenga registros asociados)")) return;
-    setEliminando(id);
-    try {
-      await deleteCaja(token!, id);
-      setAviso("Caja eliminada correctamente.");
-      await cargar();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error al eliminar.");
-    } finally {
-      setEliminando(null);
-    }
-  };
-
-  const handleDeleteHerramienta = async (id: number) => {
-    if (!window.confirm("¿Desea eliminar esta herramienta? (Se requiere que no tenga registros de inventario)")) return;
-    setEliminando(id);
-    try {
-      await deleteHerramienta(token!, id);
-      setAviso("Herramienta eliminada correctamente.");
-      await cargar();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error al eliminar.");
-    } finally {
-      setEliminando(null);
-    }
-  };
-
   const handleQChange = (v: string) => { setQ(v); setOffset(0); };
-  const handleActivaChange = (v: boolean | "") => { setActivaFiltro(v); setOffset(0); };
   const handleCatChange = (v: string) => { setCatFiltro(v); setOffset(0); };
 
   return (
@@ -144,7 +114,7 @@ export default function CajasPage() {
         </label>
         <label>
           Activa
-          <select value={activaFiltro} onChange={(e) => { setActivaFiltro(e.target.value === "" ? "" : e.target.value === "1"); setOffset(0); }}>
+          <select value={activaFiltro === "" ? "" : activaFiltro ? "1" : "0"} onChange={(e) => { setActivaFiltro(e.target.value === "" ? "" : e.target.value === "1"); setOffset(0); }}>
             <option value="">Todas</option>
             <option value="1">Sí</option>
             <option value="0">No</option>

@@ -46,7 +46,7 @@ def listar_cajas(
         params: list[Any] = []
 
         if q:
-            conditions.append("UPPER(TRIM(codigo)) LIKE CONCAT('%', UPPER(TRIM(%s)), '%')")
+            conditions.append("UPPER(TRIM(codigo)) LIKE CONCAT('%%', UPPER(TRIM(%s)), '%%')")
             params.append(q)
         if activo is not None:
             conditions.append("activa = %s")
@@ -229,19 +229,19 @@ def eliminar_caja(caja_id: int) -> dict[str, Any] | None:
             if not existing:
                 return None
 
-            # Verificar FK references en cajas_herramientas y cajas_inventario_detalle
+            # Verificar FK references: cajas_inventarios (FK desde caja) y detalle
             cur.execute(
-                "SELECT COUNT(*) c FROM cajas_herramientas WHERE caja_id = %s",
-                (caja_id,),
-            )
-            refs_tool = cur.fetchone()
-            cur.execute(
-                "SELECT COUNT(*) c FROM cajas_inventario_detalle WHERE caja_id = %s",
+                "SELECT COUNT(*) c FROM cajas_inventarios WHERE caja_id = %s",
                 (caja_id,),
             )
             refs_inv = cur.fetchone()
+            cur.execute(
+                "SELECT COUNT(*) c FROM cajas_inventario_detalle WHERE inventario_id IN (SELECT id FROM cajas_inventarios WHERE caja_id = %s)",
+                (caja_id,),
+            )
+            refs_det = cur.fetchone()
 
-            if (refs_tool and refs_tool["c"] > 0) or (refs_inv and refs_inv["c"] > 0):
+            if (refs_inv and refs_inv["c"] > 0) or (refs_det and refs_det["c"] > 0):
                 raise ValueError("No se puede eliminar la caja: tiene registros asociados.")
 
             cur.execute("DELETE FROM cajas_cajas WHERE id = %s", (caja_id,))
@@ -262,7 +262,6 @@ def listar_herramientas(
     *,
     q: str = "",
     categoria: str = "",
-    activo: int | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
@@ -272,14 +271,11 @@ def listar_herramientas(
         params: list[Any] = []
 
         if q:
-            conditions.append("UPPER(TRIM(codigo)) LIKE CONCAT('%', UPPER(TRIM(%s)), '%')")
+            conditions.append("UPPER(TRIM(codigo)) LIKE CONCAT('%%', UPPER(TRIM(%s)), '%%')")
             params.append(q)
         if categoria:
             conditions.append("categoria = %s")
             params.append(categoria)
-        if activo is not None:
-            conditions.append("activa = %s")
-            params.append(activo)
 
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
         count_sql = f"SELECT COUNT(*) c FROM cajas_herramientas{where}"
@@ -341,6 +337,9 @@ def crear_herramienta(data: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("El codigo es obligatorio.")
 
     descripcion = _coerce_null(data.get("descripcion"))
+    # DB schema requires descripcion NOT NULL, use empty string if None
+    if descripcion is None:
+        descripcion = ""
     categoria = str(data.get("categoria") or "HERRAMIENTA").strip()
     unidad = str(data.get("unidad") or "UND").strip()
     articulo_codigo = _coerce_null(data.get("articulo_codigo"))
@@ -477,7 +476,7 @@ def eliminar_herramienta(herramienta_id: int) -> dict[str, Any] | None:
 
             # Verificar FK references en cajas_inventario_detalle
             cur.execute(
-                "SELECT COUNT(*) c FROM cajas_inventario_detalle WHERE herramienta_codigo = %s",
+                "SELECT COUNT(*) c FROM cajas_inventario_detalle WHERE herramienta_id = %s",
                 (herramienta_id,),
             )
             refs = cur.fetchone()
@@ -543,9 +542,20 @@ def crear_inventario_txn(data: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(presente, bool):
             raise ValueError(f"detalle[{i}]: presente must be boolean.")
 
+    # Validar tipos de personal (CRITICAL #7) - inside main transaction to avoid pool close issues
+    TIPOS_PERMITIDOS = ("tecnico", "supervisor", "generico", "panol")
     conn = get_connection()
+    inventario_id = None
     try:
         with conn.cursor() as cur:
+            cur.execute("SELECT tipo FROM personal WHERE id = %s", (tecnico_id,))
+            t_row = cur.fetchone()
+            if not t_row or t_row["tipo"] not in TIPOS_PERMITIDOS:
+                raise ValueError(f"tecnico_id {tecnico_id}: tipo '{t_row['tipo'] if t_row else 'N/A'}' no permitido. Debe ser tecnico/supervisor/generico.")
+            cur.execute("SELECT tipo FROM personal WHERE id = %s", (supervisor_id,))
+            s_row = cur.fetchone()
+            if not s_row or s_row["tipo"] not in TIPOS_PERMITIDOS:
+                raise ValueError(f"supervisor_id {supervisor_id}: tipo '{s_row['tipo'] if s_row else 'N/A'}' no permitido. Debe ser tecnico/supervisor/generico.")
             # BEGIN transaccion
             cur.execute("BEGIN")
 
@@ -566,36 +576,46 @@ def crear_inventario_txn(data: dict[str, Any]) -> dict[str, Any]:
             if not caja_row:
                 conn.rollback()
                 raise ValueError(f"caja_id {caja_id} no existe.")
-            area = caja_row["ubicacion"]
+            area = caja_row["ubicacion"] or "General"
+            if not area or str(area).strip() == "":
+                area = "General"
 
-            # Insertar header
+            # Insertar header - use actual schema columns (area NOT NULL, obs_generales)
             cur.execute(
                 """INSERT INTO cajas_inventarios
-                   (caja_id, fecha, periodo, tecnico_id, area, supervisor_id, estado_general_caja, caja_completa, obs, estado)
-                   VALUES (%s, CURDATE(), %s, %s, %s, %s, %s, %s, %s, %s)""",
+                   (caja_id, fecha, periodo, tecnico_id, area, supervisor_id, obs_generales, estado)
+                   VALUES (%s, CURDATE(), %s, %s, %s, %s, %s, %s)""",
                 (caja_id, periodo, tecnico_id, area, supervisor_id,
-                 "abierta" if estado == "borrador" else "cerrada",
-                 1 if estado == "cerrado" else 0,
                  obs or None, estado),
             )
             inventario_id = cur.lastrowid
 
-            # Insertar detalle
+            # Insertar detalle — buscar herramienta_id desde herramienta_codigo
             for i, item in enumerate(detalle):
+                cur.execute(
+                    "SELECT id FROM cajas_herramientas WHERE codigo = %s",
+                    (item["herramienta_codigo"],),
+                )
+                ht_row = cur.fetchone()
+                if not ht_row:
+                    conn.rollback()
+                    raise ValueError(f"detalle[{i}]: herramienta_codigo '{item['herramienta_codigo']}' no existe.")
+                herramienta_id = ht_row["id"]
                 cur.execute(
                     """INSERT INTO cajas_inventario_detalle
                        (inventario_id, herramienta_id, nro_item, cantidad, estado, presente, observaciones)
                        VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                    (inventario_id, item["herramienta_codigo"], i + 1,
+                    (inventario_id, herramienta_id, i + 1,
                      int(item["cantidad"]), "bueno" if item.get("estado") == "bueno" else "regular",
                      item["presente"],
                      item.get("observaciones") or None),
                 )
 
             conn.commit()
-
-            # Retornar objeto completo con JOIN names
+        # Fetch complete object after transaction, outside cursor context
+        if inventario_id is not None:
             return obtener_inventario(inventario_id)
+        return None
 
     except IntegrityError as e:
         conn.rollback()
@@ -607,7 +627,11 @@ def crear_inventario_txn(data: dict[str, Any]) -> dict[str, Any]:
         conn.rollback()
         raise ValueError(f"Error de datos: {e}")
     finally:
-        conn.close()
+        try:
+            if conn.open:
+                conn.close()
+        except Exception:
+            pass
 
 
 def obtener_inventario(inventario_id: int) -> dict[str, Any] | None:
@@ -670,7 +694,7 @@ def obtener_inventario(inventario_id: int) -> dict[str, Any] | None:
                 "supervisor_nombre": row.get("supervisor_nombre"),
                 "area": row["area"],
                 "estado": row["estado"],
-                "obs": row["obs"],
+                "obs": row.get("obs") or row.get("obs_generales"),
                 "detalle": detalle,
             }
     finally:
@@ -703,11 +727,12 @@ def listar_inventarios(
             conditions.append("inv.estado = %s")
             params.append(estado)
         if q:
-            conditions.append("UPPER(TRIM(p.nombre)) LIKE CONCAT('%', UPPER(TRIM(%s)), '%')")
+            conditions.append("(UPPER(TRIM(p_tec.nombre)) LIKE CONCAT('%%', UPPER(TRIM(%s)), '%%') OR UPPER(TRIM(p_sup.nombre)) LIKE CONCAT('%%', UPPER(TRIM(%s)), '%%'))")
+            params.append(q)
             params.append(q)
 
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
-        count_sql = f"SELECT COUNT(*) c FROM cajas_inventarios inv{where}"
+        count_sql = f"SELECT COUNT(*) c FROM cajas_inventarios inv LEFT JOIN personal p_tec ON inv.tecnico_id = p_tec.id LEFT JOIN personal p_sup ON inv.supervisor_id = p_sup.id{where}"
         params_count = list(params)
 
         with conn.cursor() as cur:
@@ -736,7 +761,7 @@ def listar_inventarios(
                 "tecnico_nombre": r.get("tecnico_nombre"),
                 "supervisor_id": r["supervisor_id"],
                 "supervisor_nombre": r.get("supervisor_nombre"),
-                "obs": r["obs"],
+                "obs": r.get("obs") or r.get("obs_generales"),
                 "area": r["area"],
             })
 
@@ -797,15 +822,11 @@ def eliminar_inventario(inventario_id: int) -> dict[str, Any] | None:
             if row["estado"] != "borrador":
                 raise ValueError("no se puede borrar un inventario cerrado")
 
-            # Verificar FK references en detalle (NO ACTION = restrict)
+            # Verificar FK references en detalle (cascade delete para borrador)
             cur.execute(
-                "SELECT COUNT(*) c FROM cajas_inventario_detalle WHERE inventario_id = %s",
+                "DELETE FROM cajas_inventario_detalle WHERE inventario_id = %s",
                 (inventario_id,),
             )
-            refs = cur.fetchone()
-            if refs and refs["c"] > 0:
-                raise ValueError("No se puede borrar: tiene registros de detalle asociados.")
-
             cur.execute("DELETE FROM cajas_inventarios WHERE id = %s", (inventario_id,))
             conn.commit()
 
