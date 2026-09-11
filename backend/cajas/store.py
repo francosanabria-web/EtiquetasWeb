@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from pymysql.err import IntegrityError
+from pymysql.err import IntegrityError, DataError
+from pymysql import connections
 from db import get_connection
 
 
@@ -487,6 +488,328 @@ def eliminar_herramienta(herramienta_id: int) -> dict[str, Any] | None:
             conn.commit()
 
         return {"id": herramienta_id, "eliminado": True}
+    except IntegrityError as e:
+        conn.rollback()
+        raise ValueError(f"No se puede eliminar: restriccion FK - {e}")
+    finally:
+        conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# Cajas Inventarios (Transaccional)
+# --------------------------------------------------------------------------- #
+def _normalizar_periodo(periodo_str: str) -> str:
+    """Normaliza una fecha al primer dia del mes (YYYY-MM-DD)."""
+    from datetime import datetime
+    dt = datetime.strptime(periodo_str, "%Y-%m-%d")
+    return dt.replace(day=1).strftime("%Y-%m-%d")
+
+
+def crear_inventario_txn(data: dict[str, Any]) -> dict[str, Any]:
+    """CREA inventario header + detalle en TRANSACCION. UNIQUE caja_id+periodo -> 409."""
+    caja_id = data.get("caja_id")
+    tecnico_id = data.get("tecnico_id")
+    supervisor_id = data.get("supervisor_id")
+    periodo_raw = data.get("periodo")
+    estado = data.get("estado", "borrador")
+    obs = data.get("obs")
+    detalle = data.get("detalle", [])
+
+    if not caja_id:
+        raise ValueError("caja_id es obligatorio.")
+    if not tecnico_id:
+        raise ValueError("tecnico_id es obligatorio.")
+    if not supervisor_id:
+        raise ValueError("supervisor_id es obligatorio.")
+    if not periodo_raw:
+        raise ValueError("periodo es obligatorio.")
+
+    periodo = _normalizar_periodo(str(periodo_raw))
+
+    if estado not in ("borrador", "cerrado"):
+        raise ValueError("estado must be 'borrador' or 'cerrado'.")
+
+    if not isinstance(detalle, list) or len(detalle) == 0:
+        raise ValueError("detalle must contain at least one item.")
+
+    # Validar cada item del detalle
+    for i, item in enumerate(detalle):
+        if not item.get("herramienta_codigo"):
+            raise ValueError(f"detalle[{i}]: herramienta_codigo es obligatorio.")
+        cantidad = item.get("cantidad")
+        if not isinstance(cantidad, (int, float)) or cantidad <= 0:
+            raise ValueError(f"detalle[{i}]: cantidad must be integer > 0.")
+        presente = item.get("presente")
+        if not isinstance(presente, bool):
+            raise ValueError(f"detalle[{i}]: presente must be boolean.")
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            # BEGIN transaccion
+            cur.execute("BEGIN")
+
+            # Verificar UNIQUE caja_id + periodo
+            cur.execute(
+                "SELECT id FROM cajas_inventarios WHERE caja_id = %s AND periodo = %s",
+                (caja_id, periodo),
+            )
+            if cur.fetchone():
+                conn.rollback()
+                raise ValueError("ya existe inventario de esta caja para ese período")
+
+            # Snapshot area desde cajas_cajas.ubicacion
+            cur.execute(
+                "SELECT ubicacion FROM cajas_cajas WHERE id = %s", (caja_id,)
+            )
+            caja_row = cur.fetchone()
+            if not caja_row:
+                conn.rollback()
+                raise ValueError(f"caja_id {caja_id} no existe.")
+            area = caja_row["ubicacion"]
+
+            # Insertar header
+            cur.execute(
+                """INSERT INTO cajas_inventarios
+                   (caja_id, fecha, periodo, tecnico_id, area, supervisor_id, estado_general_caja, caja_completa, obs, estado)
+                   VALUES (%s, CURDATE(), %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (caja_id, periodo, tecnico_id, area, supervisor_id,
+                 "abierta" if estado == "borrador" else "cerrada",
+                 1 if estado == "cerrado" else 0,
+                 obs or None, estado),
+            )
+            inventario_id = cur.lastrowid
+
+            # Insertar detalle
+            for i, item in enumerate(detalle):
+                cur.execute(
+                    """INSERT INTO cajas_inventario_detalle
+                       (inventario_id, herramienta_id, nro_item, cantidad, estado, presente, observaciones)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                    (inventario_id, item["herramienta_codigo"], i + 1,
+                     int(item["cantidad"]), "bueno" if item.get("estado") == "bueno" else "regular",
+                     item["presente"],
+                     item.get("observaciones") or None),
+                )
+
+            conn.commit()
+
+            # Retornar objeto completo con JOIN names
+            return obtener_inventario(inventario_id)
+
+    except IntegrityError as e:
+        conn.rollback()
+        # Verificar si es violacion UNIQUE caja_id+periodo
+        if "uq_caja_periodo" in str(e).lower() or "Duplicate" in str(e):
+            raise ValueError("ya existe inventario de esta caja para ese período")
+        raise ValueError(f"Violacion de integridad: {e}")
+    except DataError as e:
+        conn.rollback()
+        raise ValueError(f"Error de datos: {e}")
+    finally:
+        conn.close()
+
+
+def obtener_inventario(inventario_id: int) -> dict[str, Any] | None:
+    """Retorna inventario completo con JOIN personal names y detalle."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT inv.*,
+                          p_tec.nombre as tecnico_nombre,
+                          p_sup.nombre as supervisor_nombre,
+                          cj.codigo as caja_codigo
+                   FROM cajas_inventarios inv
+                   LEFT JOIN personal p_tec ON inv.tecnico_id = p_tec.id
+                   LEFT JOIN personal p_sup ON inv.supervisor_id = p_sup.id
+                   LEFT JOIN cajas_cajas cj ON inv.caja_id = cj.id
+                   WHERE inv.id = %s""",
+                (inventario_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            # Obtener detalle
+            cur.execute(
+                """SELECT id, herramienta_id, nro_item, cantidad, estado, presente, observaciones
+                   FROM cajas_inventario_detalle
+                   WHERE inventario_id = %s ORDER BY nro_item ASC""",
+                (inventario_id,),
+            )
+            detalle_rows = cur.fetchall()
+
+            detalle = []
+            for dr in detalle_rows:
+                # Obtener codigo de herramienta
+                cur.execute(
+                    "SELECT codigo FROM cajas_herramientas WHERE id = %s",
+                    (dr["herramienta_id"],),
+                )
+                ht_row = cur.fetchone()
+                detalle.append({
+                    "id": dr["id"],
+                    "herramienta_codigo": ht_row["codigo"] if ht_row else str(dr["herramienta_id"]),
+                    "nro_item": dr["nro_item"],
+                    "cantidad": dr["cantidad"],
+                    "estado": dr["estado"],
+                    "presente": bool(dr["presente"]),
+                    "observaciones": dr["observaciones"],
+                })
+
+            return {
+                "id": row["id"],
+                "caja_id": row["caja_id"],
+                "caja_codigo": row["caja_codigo"],
+                "fecha": str(row["fecha"]) if row["fecha"] else None,
+                "periodo": str(row["periodo"]),
+                "tecnico_id": row["tecnico_id"],
+                "tecnico_nombre": row.get("tecnico_nombre"),
+                "supervisor_id": row["supervisor_id"],
+                "supervisor_nombre": row.get("supervisor_nombre"),
+                "area": row["area"],
+                "estado": row["estado"],
+                "obs": row["obs"],
+                "detalle": detalle,
+            }
+    finally:
+        conn.close()
+
+
+def listar_inventarios(
+    *,
+    caja_id: int | None = None,
+    periodo: str | None = None,
+    estado: str | None = None,
+    q: str = "",
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Lista inventarios con filtros y JOIN personal names."""
+    conn = get_connection()
+    try:
+        conditions = []
+        params: list[Any] = []
+
+        if caja_id is not None:
+            conditions.append("inv.caja_id = %s")
+            params.append(caja_id)
+        if periodo:
+            p = _normalizar_periodo(periodo)
+            conditions.append("inv.periodo = %s")
+            params.append(p)
+        if estado:
+            conditions.append("inv.estado = %s")
+            params.append(estado)
+        if q:
+            conditions.append("UPPER(TRIM(p.nombre)) LIKE CONCAT('%', UPPER(TRIM(%s)), '%')")
+            params.append(q)
+
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        count_sql = f"SELECT COUNT(*) c FROM cajas_inventarios inv{where}"
+        params_count = list(params)
+
+        with conn.cursor() as cur:
+            cur.execute(count_sql, params_count)
+            total = cur.fetchone()["c"]
+
+            data_sql = (
+                f"""SELECT inv.*, p_tec.nombre as tecnico_nombre, p_sup.nombre as supervisor_nombre
+                    FROM cajas_inventarios inv
+                    LEFT JOIN personal p_tec ON inv.tecnico_id = p_tec.id
+                    LEFT JOIN personal p_sup ON inv.supervisor_id = p_sup.id
+                    {where} ORDER BY inv.periodo DESC, inv.id DESC
+                    LIMIT %s OFFSET %s"""
+            )
+            cur.execute(data_sql, params + [limit, offset])
+            rows = cur.fetchall()
+
+        items = []
+        for r in rows:
+            items.append({
+                "id": r["id"],
+                "caja_id": r["caja_id"],
+                "periodo": str(r["periodo"]),
+                "estado": r["estado"],
+                "tecnico_id": r["tecnico_id"],
+                "tecnico_nombre": r.get("tecnico_nombre"),
+                "supervisor_id": r["supervisor_id"],
+                "supervisor_nombre": r.get("supervisor_nombre"),
+                "obs": r["obs"],
+                "area": r["area"],
+            })
+
+        return {"items": items, "total": total}
+    finally:
+        conn.close()
+
+
+def actualizar_estado_inventario(inventario_id: int, nuevo_estado: str) -> dict[str, Any] | None:
+    """Actualiza estado de inventario con máquina de estados."""
+    if nuevo_estado not in ("borrador", "cerrado"):
+        raise ValueError("estado must be 'borrador' or 'cerrado'.")
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT estado FROM cajas_inventarios WHERE id = %s", (inventario_id,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            estado_actual = row["estado"]
+
+            # Transiciones validas: borrador -> cerrado
+            if estado_actual == "cerrado" and nuevo_estado == "borrador":
+                raise ValueError("no se puede revertir a borrador una vez cerrado")
+            if estado_actual == nuevo_estado:
+                return {"id": inventario_id, "estado": nuevo_estado, "changed": False}
+
+            cur.execute(
+                "UPDATE cajas_inventarios SET estado = %s WHERE id = %s",
+                (nuevo_estado, inventario_id),
+            )
+            conn.commit()
+
+        return {"id": inventario_id, "estado": nuevo_estado, "changed": True}
+    except IntegrityError as e:
+        conn.rollback()
+        raise ValueError(f"No se puede actualizar estado: {e}")
+    finally:
+        conn.close()
+
+
+def eliminar_inventario(inventario_id: int) -> dict[str, Any] | None:
+    """Elimina inventario solo si estado = borrador."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT estado FROM cajas_inventarios WHERE id = %s", (inventario_id,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            if row["estado"] != "borrador":
+                raise ValueError("no se puede borrar un inventario cerrado")
+
+            # Verificar FK references en detalle (NO ACTION = restrict)
+            cur.execute(
+                "SELECT COUNT(*) c FROM cajas_inventario_detalle WHERE inventario_id = %s",
+                (inventario_id,),
+            )
+            refs = cur.fetchone()
+            if refs and refs["c"] > 0:
+                raise ValueError("No se puede borrar: tiene registros de detalle asociados.")
+
+            cur.execute("DELETE FROM cajas_inventarios WHERE id = %s", (inventario_id,))
+            conn.commit()
+
+        return {"id": inventario_id, "eliminado": True}
     except IntegrityError as e:
         conn.rollback()
         raise ValueError(f"No se puede eliminar: restriccion FK - {e}")

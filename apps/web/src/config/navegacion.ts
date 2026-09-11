@@ -1,11 +1,6 @@
 export type Rol = "admin" | "panol" | "supervisor" | "jefatura";
 
-export type Usuario = {
-  id: string;
-  nombre: string;
-  email: string;
-  rol: Rol;
-};
+export type NivelPermiso = "sin_acceso" | "consulta" | "escritura";
 
 export type ModuloId =
   | "inicio"
@@ -16,7 +11,35 @@ export type ModuloId =
   | "minuta"
   | "kpis"
   | "solicitudes"
-  | "buscador";
+  | "buscador"
+  | "usuarios"
+  | "personal"
+  | "cajas";
+
+export type PermisosUsuario = Record<ModuloId, NivelPermiso>;
+
+export type Usuario = {
+  id: number;
+  usuario: string;
+  nombre: string;
+  email: string;
+  rol: Rol;
+  activo?: boolean;
+  permisos: PermisosUsuario;
+};
+
+export function etiquetaRol(rol: Rol): string {
+  switch (rol) {
+    case "admin":
+      return "Administrador";
+    case "panol":
+      return "Pañol";
+    case "supervisor":
+      return "Supervisor";
+    case "jefatura":
+      return "Jefatura / Gerencia";
+  }
+}
 
 export type TipoAcceso = "interno" | "externo" | "proximo";
 
@@ -55,7 +78,7 @@ export const MODULOS: ModuloNav[] = [
   {
     id: "salidas",
     titulo: "Salidas",
-    descripcion: "Registrar solicitudes y salidas de material del pañol.",
+    descripcion: "Registrar egresos de material del pañol (carga pendiente + finalizar).",
     icono: "📤",
     ruta: "/salidas",
     tipo: "interno",
@@ -65,11 +88,11 @@ export const MODULOS: ModuloNav[] = [
   {
     id: "reportes",
     titulo: "Reportes",
-    descripcion: "Informes y exportaciones para jefatura y gerencia.",
+    descripcion: "Consultas operativas de movimientos, filtros y export CSV.",
     icono: "📊",
     ruta: "/reportes",
     tipo: "interno",
-    roles: ["admin", "jefatura"],
+    roles: ["admin", "panol", "jefatura"],
     enSidebar: true,
   },
   {
@@ -123,6 +146,36 @@ export const MODULOS: ModuloNav[] = [
     enSidebar: true,
   },
   {
+    id: "usuarios",
+    titulo: "Usuarios",
+    descripcion: "Alta de usuarios, contraseñas y permisos por módulo.",
+    icono: "👥",
+    ruta: "/usuarios",
+    tipo: "interno",
+    roles: ["admin"],
+    enSidebar: true,
+  },
+  {
+    id: "personal",
+    titulo: "Personal",
+    descripcion: "Gestión de personal y áreas organizacionales.",
+    icono: "👤",
+    ruta: "/admin/personal",
+    tipo: "interno",
+    roles: ["admin", "panol"],
+    enSidebar: true,
+  },
+  {
+    id: "cajas",
+    titulo: "Cajas",
+    descripcion: "Gestión de cajas, herramientas e inventarios mensuales.",
+    icono: "Inventory2",
+    ruta: "/admin/cajas",
+    tipo: "interno",
+    roles: ["admin", "panol", "supervisor", "jefatura"],
+    enSidebar: true,
+  },
+  {
     id: "buscador",
     titulo: "Buscador",
     descripcion: "Consultar alias, stock y ubicaciones (app en Vercel).",
@@ -134,14 +187,21 @@ export const MODULOS: ModuloNav[] = [
   },
 ];
 
-export function modulosParaRol(rol: Rol): ModuloNav[] {
-  return MODULOS.filter((m) => m.roles.includes(rol));
+/** Nivel de permiso efectivo del usuario para un módulo. */
+export function permisoDe(usuario: Usuario | null, modulo: ModuloId): NivelPermiso {
+  if (!usuario) return "sin_acceso";
+  return usuario.permisos?.[modulo] ?? "sin_acceso";
 }
 
-export function modulosSidebar(rol: Rol): ModuloNav[] {
-  return modulosParaRol(rol).filter((m) => m.enSidebar);
+/** Módulos que el usuario puede ver (permiso ≠ sin_acceso). */
+export function modulosVisibles(usuario: Usuario | null): ModuloNav[] {
+  return MODULOS.filter((m) => permisoDe(usuario, m.id) !== "sin_acceso");
 }
 
-export function modulosInicio(rol: Rol): ModuloNav[] {
-  return modulosParaRol(rol).filter((m) => m.id !== "inicio");
+export function modulosSidebar(usuario: Usuario | null): ModuloNav[] {
+  return modulosVisibles(usuario).filter((m) => m.enSidebar);
+}
+
+export function modulosInicio(usuario: Usuario | null): ModuloNav[] {
+  return modulosVisibles(usuario).filter((m) => m.id !== "inicio");
 }

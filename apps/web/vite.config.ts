@@ -32,11 +32,68 @@ const proxySolicitudes = {
   },
 };
 
-const serverOpts = {
+const proxyUsuarios = {
+  "/api/usuarios": {
+    target: "http://127.0.0.1:8015",
+    ...proxyOpts,
+  },
+};
+
+const proxyActivos = {
+  "/api/activos": {
+    target: "http://127.0.0.1:8016",
+    ...proxyOpts,
+  },
+};
+
+const proxyReportes = {
+  "/api/reportes": {
+    target: "http://127.0.0.1:8017",
+    ...proxyOpts,
+  },
+};
+
+const proxySalidas = {
+  "/api/salidas": {
+    target: "http://127.0.0.1:8018",
+    ...proxyOpts,
+  },
+};
+
+const proxyPersonal = {
+  "/api/personal": {
+    target: "http://127.0.0.1:8019",
+    ...proxyOpts,
+  },
+  "/api/areas": {
+    target: "http://127.0.0.1:8019",
+    ...proxyOpts,
+  },
+};
+
+const proxyCajas = {
+  "/api/cajas": {
+    target: "http://127.0.0.1:8021",
+    ...proxyOpts,
+  },
+};
+
+const const serverOpts = {
   host: true,
   port: 5180,
   allowedHosts: true as const,
-  proxy: { ...proxyEmail, ...proxyMinuta, ...proxyKpis, ...proxySolicitudes },
+  proxy: {
+    ...proxyEmail,
+    ...proxyMinuta,
+    ...proxyKpis,
+    ...proxySolicitudes,
+    ...proxyUsuarios,
+    ...proxyActivos,
+    ...proxyReportes,
+    ...proxySalidas,
+    ...proxyPersonal,
+    ...proxyCajas,
+  },
 };
 
 export default defineConfig({

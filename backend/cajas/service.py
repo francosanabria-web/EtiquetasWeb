@@ -16,6 +16,7 @@ from db import verificar_permiso, init_db
 from store import (
     listar_cajas, obtener_caja, crear_caja, actualizar_caja, eliminar_caja,
     listar_herramientas, obtener_herramienta, crear_herramienta, actualizar_herramienta, eliminar_herramienta,
+    crear_inventario_txn, obtener_inventario, listar_inventarios, actualizar_estado_inventario, eliminar_inventario,
 )
 
 
@@ -153,3 +154,83 @@ def delete_herramienta(token: str, herramienta_id: int) -> dict[str, Any] | tupl
         return result
     except ValueError as e:
         return (str(e), 409)
+
+
+# --------------------------------------------------------------------------- #
+# Cajas Inventarios
+# --------------------------------------------------------------------------- #
+def get_inventarios_list(token: str, params: dict[str, Any]) -> dict[str, Any] | tuple[str, int]:
+    if not _requerir_permiso(token, "cajas:lectura"):
+        return ("No autorizado", 401)
+    caja_id = params.get("caja_id")
+    periodo = params.get("periodo")
+    estado = params.get("estado")
+    q = str(params.get("q", ""))
+    limit = int(params.get("limit", 50))
+    offset = int(params.get("offset", 0))
+    try:
+        return listar_inventarios(
+            caja_id=int(caja_id) if caja_id else None,
+            periodo=periodo,
+            estado=estado,
+            q=q,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as e:
+        return (str(e), 400)
+
+
+def get_inventario_by_id(token: str, inv_id: int) -> dict[str, Any] | tuple[str, int]:
+    if not _requerir_permiso(token, "cajas:lectura"):
+        return ("No autorizado", 401)
+    inv = obtener_inventario(inv_id)
+    if not inv:
+        return ("No encontrado", 404)
+    return inv
+
+
+def create_inventario(token: str, data: dict[str, Any]) -> dict[str, Any] | tuple[str, int]:
+    if not _requerir_permiso(token, "cajas:escritura"):
+        return ("No autorizado", 401)
+    try:
+        return crear_inventario_txn(data)
+    except ValueError as e:
+        msg = str(e)
+        if "ya existe inventario" in msg.lower() or "periodo" in msg.lower():
+            return (msg, 409)
+        if "no existe" in msg.lower() or "obligatorio" in msg.lower() or "invalido" in msg.lower():
+            return (msg, 400)
+        return (msg, 400)
+
+
+def update_inventario_estado(token: str, inv_id: int, estado: str) -> dict[str, Any] | tuple[str, int]:
+    if not _requerir_permiso(token, "cajas:escritura"):
+        return ("No autorizado", 401)
+    if estado not in ("borrador", "cerrado"):
+        return ("estado must be 'borrador' or 'cerrado'", 400)
+    try:
+        result = actualizar_estado_inventario(inv_id, estado)
+        if result is None:
+            return ("No encontrado", 404)
+        return result
+    except ValueError as e:
+        msg = str(e)
+        if "revertir" in msg.lower():
+            return (msg, 400)
+        return (msg, 400)
+
+
+def delete_inventario(token: str, inv_id: int) -> dict[str, Any] | tuple[str, int]:
+    if not _requerir_permiso(token, "cajas:escritura"):
+        return ("No autorizado", 401)
+    try:
+        result = eliminar_inventario(inv_id)
+        if result is None:
+            return ("No encontrado", 404)
+        return result
+    except ValueError as e:
+        msg = str(e)
+        if "cerrado" in msg.lower():
+            return (msg, 409)
+        return (msg, 400)

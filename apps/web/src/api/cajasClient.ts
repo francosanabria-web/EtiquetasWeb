@@ -57,6 +57,31 @@ export type Herramienta = {
   articulo_codigo: string | null;
 };
 
+export type InventarioDetalle = {
+  id: number;
+  herramienta_codigo: string;
+  articulo_codigo: string | null;
+  cantidad: number;
+  presente: boolean;
+  estado?: 'bueno' | 'regular' | 'malo';
+  observaciones?: string;
+};
+
+export type Inventario = {
+  id: number;
+  caja_id: number;
+  caja_codigo: string;
+  tecnico_id: number;
+  tecnico_nombre: string;
+  supervisor_id: number;
+  supervisor_nombre: string;
+  periodo: string; // YYYY-MM-DD (first day of month)
+  estado: 'borrador' | 'cerrado';
+  obs: string | null;
+  area: string | null;
+  detalle: InventarioDetalle[];
+};
+
 export type CajaListResponse = {
   items: Caja[];
   total: number;
@@ -64,6 +89,11 @@ export type CajaListResponse = {
 
 export type HerramientaListResponse = {
   items: Herramienta[];
+  total: number;
+};
+
+export type InventarioListResponse = {
+  items: Inventario[];
   total: number;
 };
 
@@ -182,4 +212,44 @@ export async function deleteHerramienta(token: string, id: number): Promise<void
 export async function getHealth(): Promise<{ status: string; service: string }> {
   const data = await fetchJson<{ status: string; service: string }>("/health", {});
   return data;
+}
+
+export async function getInventarios(token: string, params?: {
+  caja_id?: number; periodo?: string; estado?: string; q?: string; limit?: number; offset?: number;
+}): Promise<InventarioListResponse> {
+  const searchParams = new URLSearchParams();
+  if (params?.caja_id != null) searchParams.set("caja_id", String(params.caja_id));
+  if (params?.periodo) searchParams.set("periodo", params.periodo);
+  if (params?.estado) searchParams.set("estado", params.estado);
+  if (params?.q) searchParams.set("q", params.q);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.offset) searchParams.set("offset", String(params.offset));
+  const qs = searchParams.toString();
+  const path = qs ? `/api/cajas/inventarios?${qs}` : "/api/cajas/inventarios";
+  const data = await fetchJson<{ items: Inventario[]; total: number }>(path, {}, token);
+  return { items: data.items ?? data, total: data.total ?? 0 };
+}
+
+export async function getInventarioById(token: string, id: number): Promise<Inventario> {
+  const data = await fetchJson<Inventario>(`/api/cajas/inventarios/${id}`, {}, token);
+  return data;
+}
+
+export async function createInventario(token: string, data: Omit<Inventario, "id" | "detalle"> & { detalle: Array<Omit<InventarioDetalle, "id">>>): Promise<Inventario> {
+  const payload = { ...data };
+  const result = await fetchJson<Inventario>("/api/cajas/inventarios", {
+    method: "POST", body: JSON.stringify(payload),
+  }, token);
+  return result;
+}
+
+export async function updateInventarioEstado(token: string, id: number, estado: 'borrador' | 'cerrado'): Promise<{ estado: string }> {
+  const result = await fetchJson<{ estado: string }>(`/api/cajas/inventarios/${id}/estado`, {
+    method: "PATCH", body: JSON.stringify({ estado }),
+  }, token);
+  return result;
+}
+
+export async function deleteInventario(token: string, id: number): Promise<void> {
+  await fetchJson<{ ok: boolean }>(`/api/cajas/inventarios/${id}`, { method: "DELETE" }, token);
 }

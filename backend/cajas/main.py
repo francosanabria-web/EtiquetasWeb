@@ -135,6 +135,60 @@ async def delete_herramienta(request: Request) -> JSONResponse:
     return JSONResponse(result)
 
 
+async def get_inventarios(request: Request) -> JSONResponse:
+    result = service.get_inventarios_list(_token(request), dict(request.query_params))
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
+async def get_inventario_by_id(request: Request) -> JSONResponse:
+    pid = int(request.path_params["id"])
+    result = service.get_inventario_by_id(_token(request), pid)
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
+async def post_inventario(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"detail": "JSON inválido."}, status_code=400)
+    result = service.create_inventario(_token(request), body if isinstance(body, dict) else {})
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result, status_code=201)
+
+
+async def patch_inventario_estado(request: Request) -> JSONResponse:
+    pid = int(request.path_params["id"])
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"detail": "JSON inválido."}, status_code=400)
+    estado = body.get("estado") if isinstance(body, dict) else None
+    if not estado:
+        return JSONResponse({"detail": "estado es obligatorio."}, status_code=400)
+    result = service.update_inventario_estado(_token(request), pid, estado)
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
+async def delete_inventario(request: Request) -> JSONResponse:
+    pid = int(request.path_params["id"])
+    result = service.delete_inventario(_token(request), pid)
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
 app = Starlette(
     routes=[
         Route("/health", health, methods=["GET"]),
@@ -148,6 +202,11 @@ app = Starlette(
         Route("/api/cajas/herramientas", post_herramienta, methods=["POST"]),
         Route("/api/cajas/herramientas/{id:int}", patch_herramienta, methods=["PATCH"]),
         Route("/api/cajas/herramientas/{id:int}", delete_herramienta, methods=["DELETE"]),
+        Route("/api/cajas/inventarios", get_inventarios, methods=["GET"]),
+        Route("/api/cajas/inventarios/{id:int}", get_inventario_by_id, methods=["GET"]),
+        Route("/api/cajas/inventarios", post_inventario, methods=["POST"]),
+        Route("/api/cajas/inventarios/{id:int}/estado", patch_inventario_estado, methods=["PATCH"]),
+        Route("/api/cajas/inventarios/{id:int}", delete_inventario, methods=["DELETE"]),
     ],
 )
 app.add_middleware(

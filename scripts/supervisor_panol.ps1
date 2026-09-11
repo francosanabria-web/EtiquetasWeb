@@ -2,7 +2,7 @@
 #  supervisor_panol.ps1
 #  Mantiene vivos los servicios del portal (NO toca impresion / etiquetas):
 #    KPIs :8001 | Minuta :8013 | Solicitudes :8014 | Usuarios :8015
-#    Activos :8016 | Reportes :8017 | Salidas :8018 | Email :8020 | Portal Vite :5180
+#    Personal :8019 | Cajas :8021 | Activos :8016 | Reportes :8017 | Salidas :8018 | Email :8020 | Portal Vite :5180
 #
 #  - Idempotente: no duplica si el puerto ya escucha.
 #  - Auto-reparable: cada ~20s levanta lo caido; reinicia colgados
@@ -64,6 +64,24 @@ $Servicios = @(
     Health = "http://127.0.0.1:8015/health"
     Accept503 = $false
     Dir = Join-Path $Raiz "backend\usuarios"
+    PyRel = ".venv\Scripts\python.exe"
+    Uvicorn = "main:app"
+  }
+  @{
+    Name = "Personal"
+    Port = 8019
+    Health = "http://127.0.0.1:8019/health"
+    Accept503 = $false
+    Dir = Join-Path $Raiz "backend\personal"
+    PyRel = ".venv\Scripts\python.exe"
+    Uvicorn = "main:app"
+  }
+  @{
+    Name = "Cajas"
+    Port = 8021
+    Health = "http://127.0.0.1:8021/health"
+    Accept503 = $false
+    Dir = Join-Path $Raiz "backend\cajas"
     PyRel = ".venv\Scripts\python.exe"
     Uvicorn = "main:app"
   }
