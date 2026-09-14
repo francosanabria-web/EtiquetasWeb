@@ -135,6 +135,7 @@ $Servicios = @(
 function Log($msg) {
   $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
   Add-Content -Path (Join-Path $Logs "supervisor_panol.log") -Value "[$ts] $msg"
+  Write-Host "[$ts] $msg" -ForegroundColor Gray
 }
 
 function Puerto-Escucha([int]$port) {
@@ -172,6 +173,7 @@ function Iniciar-Backend($svc) {
     return
   }
   Log "Iniciando $($svc.Name) (:$($svc.Port))..."
+  Write-Host "Iniciando $($svc.Name) (:$($svc.Port))..." -ForegroundColor Yellow
   $out = Join-Path $Logs ("panol_{0}.out.log" -f $svc.Name.ToLower())
   $err = Join-Path $Logs ("panol_{0}.err.log" -f $svc.Name.ToLower())
   Start-Process -FilePath $py `
@@ -184,6 +186,7 @@ function Iniciar-Portal($svc) {
   if (Puerto-Escucha $svc.Port) { return }
   $vite = Join-Path $svc.Dir $svc.ViteJs
   Log "Iniciando Portal (:$($svc.Port))..."
+  Write-Host "Iniciando Portal (:$($svc.Port))..." -ForegroundColor Yellow
   $out = Join-Path $Logs "panol_portal.out.log"
   $err = Join-Path $Logs "panol_portal.err.log"
   if (Test-Path $vite) {
@@ -204,6 +207,7 @@ function Reparar-Si-Colgado($svc) {
   $h = Health-Estado $svc
   if ($h -eq "ok" -or $h -eq "loading") { return }
   Log "$($svc.Name) escucha :$($svc.Port) pero /health muerto - reiniciando."
+  Write-Host "Reiniciando $($svc.Name) (:$($svc.Port))..." -ForegroundColor Yellow
   Matar-PorPuerto $svc.Port $svc.Name
   Start-Sleep -Seconds 2
 }
@@ -233,6 +237,10 @@ function Ejecutar-Reinicio-Suave {
 
 # --- Bucle principal --------------------------------------------------------
 Log "=== Supervisor portal iniciado (PID $PID) ==="
+Write-Host "=== Supervisor Pañol iniciado (PID $PID) ===" -ForegroundColor Cyan
+Write-Host "Servicios: KPIs 8001 | Minuta 8013 | Solicitudes 8014 | Usuarios 8015 | Personal 8019 | Cajas 8021 | Activos 8016 | Reportes 8017 | Salidas 8018 | Email 8020 | Portal 5180" -ForegroundColor DarkGray
+Write-Host "Logs: $Logs" -ForegroundColor DarkGray
+Write-Host "Intervalo: ${IntervaloSeg}s | Reinicio suave: ${ReinicioDesde}:00-${ReinicioHasta}:00" -ForegroundColor DarkGray
 while ($true) {
   if (Reinicio-Diario-Pendiente) {
     Ejecutar-Reinicio-Suave
@@ -247,5 +255,6 @@ while ($true) {
     }
   }
 
+  Write-Host "[$(Get-Date -Format HH:mm:ss)] check..." -ForegroundColor DarkGray
   Start-Sleep -Seconds $IntervaloSeg
 }

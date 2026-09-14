@@ -35,8 +35,9 @@ export default function CajasPage() {
   // Filtros herramientas
   const [catFiltro, setCatFiltro] = useState("");
 
-  // Paginación
-  const [offset, setOffset] = useState(0);
+  // Paginación — offsets separados para evitar paginación cruzada
+  const [offsetCajas, setOffsetCajas] = useState(0);
+  const [offsetHerramientas, setOffsetHerramientas] = useState(0);
 
   // Modales
   const [selCaja, setSelCaja] = useState<Caja | null>(null);
@@ -49,8 +50,8 @@ export default function CajasPage() {
     setLoading(true);
     setError(null);
     try {
-      const cData = await getCajas(token, { q, activa: activaFiltro !== "" ? activaFiltro : undefined, limit: PAGE_SIZE, offset });
-      const hData = await getHerramientas(token, { q: "", categoria: catFiltro || undefined, limit: PAGE_SIZE, offset });
+      const cData = await getCajas(token, { q, activa: activaFiltro !== "" ? activaFiltro : undefined, limit: PAGE_SIZE, offset: offsetCajas });
+      const hData = await getHerramientas(token, { q: "", categoria: catFiltro || undefined, limit: PAGE_SIZE, offset: offsetHerramientas });
       setCajas(cData.items);
       setCajasTotal(cData.total);
       setHerramientas(hData.items);
@@ -60,7 +61,7 @@ export default function CajasPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, q, activaFiltro, catFiltro, offset, puedeLeer]);
+  }, [token, q, activaFiltro, catFiltro, offsetCajas, offsetHerramientas, puedeLeer]);
 
   useEffect(() => { void cargar(); }, [cargar]);
 
@@ -81,8 +82,8 @@ export default function CajasPage() {
     await cargar();
   };
 
-  const handleQChange = (v: string) => { setQ(v); setOffset(0); };
-  const handleCatChange = (v: string) => { setCatFiltro(v); setOffset(0); };
+  const handleQChange = (v: string) => { setQ(v); setOffsetCajas(0); };
+  const handleCatChange = (v: string) => { setCatFiltro(v); setOffsetHerramientas(0); };
 
   return (
     <div className="page-content sol-page">
@@ -114,7 +115,7 @@ export default function CajasPage() {
         </label>
         <label>
           Activa
-          <select value={activaFiltro === "" ? "" : activaFiltro ? "1" : "0"} onChange={(e) => { setActivaFiltro(e.target.value === "" ? "" : e.target.value === "1"); setOffset(0); }}>
+          <select value={activaFiltro === "" ? "" : activaFiltro ? "1" : "0"} onChange={(e) => { setActivaFiltro(e.target.value === "" ? "" : e.target.value === "1"); setOffsetCajas(0); }}>
             <option value="">Todas</option>
             <option value="1">Sí</option>
             <option value="0">No</option>
@@ -150,18 +151,18 @@ export default function CajasPage() {
       {/* Paginación Cajas */}
       {cajasPages > 1 && (
         <div className="sol-pagination">
-          <button type="button" className="btn-ghost btn-sm" disabled={offset === 0} onClick={() => setOffset(offset - PAGE_SIZE)}>Anterior</button>
-          <span>Página {Math.floor(offset / PAGE_SIZE) + 1} de {cajasPages}</span>
-          <button type="button" className="btn-ghost btn-sm" disabled={offset + PAGE_SIZE >= cajasTotal} onClick={() => setOffset(offset + PAGE_SIZE)}>Siguiente</button>
+          <button type="button" className="btn-ghost btn-sm" disabled={offsetCajas === 0} onClick={() => setOffsetCajas(offsetCajas - PAGE_SIZE)}>Anterior</button>
+          <span>Página {Math.floor(offsetCajas / PAGE_SIZE) + 1} de {cajasPages}</span>
+          <button type="button" className="btn-ghost btn-sm" disabled={offsetCajas + PAGE_SIZE >= cajasTotal} onClick={() => setOffsetCajas(offsetCajas + PAGE_SIZE)}>Siguiente</button>
         </div>
       )}
 
       {/* Paginación Herramientas */}
       {herramientasPages > 1 && (
         <div className="sol-pagination">
-          <button type="button" className="btn-ghost btn-sm" disabled={offset === 0} onClick={() => setOffset(offset - PAGE_SIZE)}>Anterior</button>
-          <span>Página {Math.floor(offset / PAGE_SIZE) + 1} de {herramientasPages}</span>
-          <button type="button" className="btn-ghost btn-sm" disabled={offset + PAGE_SIZE >= herramientasTotal} onClick={() => setOffset(offset + PAGE_SIZE)}>Siguiente</button>
+          <button type="button" className="btn-ghost btn-sm" disabled={offsetHerramientas === 0} onClick={() => setOffsetHerramientas(offsetHerramientas - PAGE_SIZE)}>Anterior</button>
+          <span>Página {Math.floor(offsetHerramientas / PAGE_SIZE) + 1} de {herramientasPages}</span>
+          <button type="button" className="btn-ghost btn-sm" disabled={offsetHerramientas + PAGE_SIZE >= herramientasTotal} onClick={() => setOffsetHerramientas(offsetHerramientas + PAGE_SIZE)}>Siguiente</button>
         </div>
       )}
 

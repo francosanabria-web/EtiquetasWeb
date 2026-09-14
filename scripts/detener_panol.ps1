@@ -39,6 +39,8 @@ Matar-PorPuerto 8015 "Usuarios"
 Matar-PorPuerto 8016 "Activos"
 Matar-PorPuerto 8017 "Reportes"
 Matar-PorPuerto 8018 "Salidas"
+Matar-PorPuerto 8019 "Personal"
+Matar-PorPuerto 8021 "Cajas"
 Matar-PorPuerto 8020 "Email"
 Matar-PorPuerto 5180 "Portal"
 
