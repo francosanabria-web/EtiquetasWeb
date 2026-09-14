@@ -3,6 +3,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { permisoDe } from "../../config/navegacion";
 import {
@@ -16,6 +17,7 @@ import HerramientaFormModal from "./HerramientaFormModal";
 const PAGE_SIZE = 25;
 
 export default function CajasPage() {
+  const navigate = useNavigate();
   const { usuario, token } = useAuth();
   const puedeEscribir = permisoDe(usuario, "cajas") === "escritura";
   const puedeLeer = permisoDe(usuario, "cajas") !== "sin_acceso";
@@ -92,16 +94,23 @@ export default function CajasPage() {
           <h1>Cajas de Herramientas</h1>
           <p className="sub">Gestión de cajas y herramientas. Busca, filtra y administra registros.</p>
         </div>
-        {puedeEscribir && (
-          <>
-            <button type="button" className="btn-primary" onClick={() => { setSelCaja(null); setCreandoCaja(true); }}>
-              + Nueva Caja
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          {puedeLeer && (
+            <button type="button" className="btn-ghost" onClick={() => navigate("/admin/cajas/inventarios")}>
+              Ver Inventarios
             </button>
-            <button type="button" className="btn-primary" onClick={() => { setSelHerramienta(null); setCreandoHerramienta(true); }}>
-              + Nueva Herramienta
-            </button>
-          </>
-        )}
+          )}
+          {puedeEscribir && (
+            <>
+              <button type="button" className="btn-primary" onClick={() => { setSelCaja(null); setCreandoCaja(true); }}>
+                + Nueva Caja
+              </button>
+              <button type="button" className="btn-primary" onClick={() => { setSelHerramienta(null); setCreandoHerramienta(true); }}>
+                + Nueva Herramienta
+              </button>
+            </>
+          )}
+        </div>
       </header>
 
       {error && <p className="error" role="status">{error}</p>}

@@ -16,6 +16,7 @@ import ReportesPage from "./modules/reportes/ReportesPage";
 import SalidasPage from "./modules/salidas/SalidasPage";
 import PersonalPage from "./modules/personal/PersonalPage";
 import CajasPage from "./modules/cajas/CajasPage";
+import InventariosPage from "./modules/cajas/InventariosPage";
 
 const KpiDashboard = lazy(() => import("./components/kpis/KpiDashboard"));
 
@@ -63,6 +64,7 @@ export default function App() {
                 </Route>
                 <Route element={<RequirePermiso modulo="cajas" />}>
                   <Route path="/admin/cajas" element={<CajasPage />} />
+                  <Route path="/admin/cajas/inventarios" element={<InventariosPage />} />
                 </Route>
               </Route>
             </Route>

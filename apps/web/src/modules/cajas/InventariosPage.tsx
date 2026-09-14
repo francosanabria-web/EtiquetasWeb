@@ -3,6 +3,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { permisoDe } from "../../config/navegacion";
 import {
@@ -15,6 +16,7 @@ import InventarioFormModal from "./InventarioFormModal";
 const PAGE_SIZE = 25;
 
 export default function InventariosPage() {
+  const navigate = useNavigate();
   const { usuario, token } = useAuth();
   const puedeEscribir = permisoDe(usuario, "cajas") === "escritura";
   const puedeLeer = permisoDe(usuario, "cajas") !== "sin_acceso";
@@ -123,11 +125,16 @@ export default function InventariosPage() {
           <h1>Inventarios Mensuales</h1>
           <p className="sub">Gestión de inventarios por caja y período. Un inventario por caja por mes.</p>
         </div>
-        {puedeEscribir && (
-          <button type="button" className="btn-primary" onClick={() => setCreando(true)}>
-            + Nuevo Inventario
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <button type="button" className="btn-ghost" onClick={() => navigate("/admin/cajas")}>
+            ← Volver a Cajas
           </button>
-        )}
+          {puedeEscribir && (
+            <button type="button" className="btn-primary" onClick={() => setCreando(true)}>
+              + Nuevo Inventario
+            </button>
+          )}
+        </div>
       </header>
 
       {error && <p className="error" role="status">{error}</p>}
