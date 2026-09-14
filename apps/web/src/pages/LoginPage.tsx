@@ -4,7 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 
 export default function LoginPage() {
   const { usuario, iniciarSesion } = useAuth();
-  const [email, setEmail] = useState("");
+  const [identificador, setIdentificador] = useState("");
   const [clave, setClave] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
@@ -15,7 +15,7 @@ export default function LoginPage() {
     e.preventDefault();
     setCargando(true);
     setError(null);
-    const err = await iniciarSesion(email, clave);
+    const err = await iniciarSesion(identificador, clave);
     setCargando(false);
     if (err) setError(err);
   };
@@ -27,13 +27,13 @@ export default function LoginPage() {
         <p className="sub">Portal integrado de gestión</p>
 
         <label>
-          Usuario / email
+          Usuario
           <input
             type="text"
             autoComplete="username"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="admin@panol.local"
+            value={identificador}
+            onChange={(e) => setIdentificador(e.target.value)}
+            placeholder="admin (o admin@panol.local)"
             required
           />
         </label>
@@ -58,10 +58,10 @@ export default function LoginPage() {
         <details className="demo-hint">
           <summary>Cuentas de prueba (solo desarrollo)</summary>
           <ul>
-            <li><strong>Admin:</strong> admin@panol.local / admin123</li>
-            <li><strong>Pañol:</strong> panol@panol.local / panol123</li>
-            <li><strong>Supervisor:</strong> supervisor@panol.local / supervisor123</li>
-            <li><strong>Jefatura/Gerencia:</strong> jefatura@panol.local / jefatura123</li>
+            <li><strong>Admin:</strong> admin / 1379</li>
+            <li><strong>Pañol:</strong> panol / 1472</li>
+            <li><strong>Supervisor:</strong> supervisor / supervisor123</li>
+            <li><strong>Jefatura/Gerencia:</strong> jefatura / jefatura123</li>
           </ul>
         </details>
       </form>

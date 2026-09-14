@@ -19,6 +19,9 @@ export const PERMISOS_ROL: Record<Rol, PermisosPorRol> = {
     kpis: "escritura",
     solicitudes: "escritura",
     buscador: "escritura",
+    usuarios: "escritura",
+    personal: "escritura",
+    cajas: "escritura",
   },
   panol: {
     inicio: "escritura",
@@ -30,6 +33,9 @@ export const PERMISOS_ROL: Record<Rol, PermisosPorRol> = {
     kpis: "escritura",
     solicitudes: "escritura",
     buscador: "escritura",
+    usuarios: "sin_acceso",
+    personal: "escritura",
+    cajas: "escritura",
   },
   supervisor: {
     inicio: "consulta",
@@ -41,6 +47,9 @@ export const PERMISOS_ROL: Record<Rol, PermisosPorRol> = {
     kpis: "sin_acceso",
     solicitudes: "escritura",
     buscador: "consulta",
+    usuarios: "sin_acceso",
+    personal: "escritura",
+    cajas: "consulta",
   },
   jefatura: {
     inicio: "consulta",
@@ -52,6 +61,9 @@ export const PERMISOS_ROL: Record<Rol, PermisosPorRol> = {
     kpis: "consulta",
     solicitudes: "consulta",
     buscador: "consulta",
+    usuarios: "sin_acceso",
+    personal: "consulta",
+    cajas: "consulta",
   },
 };
 

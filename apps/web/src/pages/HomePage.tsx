@@ -7,7 +7,7 @@ export default function HomePage() {
   const { usuario } = useAuth();
   if (!usuario) return null;
 
-  const modulos = modulosInicio(usuario.rol);
+  const modulos = modulosInicio(usuario);
 
   return (
     <div className="page-content">

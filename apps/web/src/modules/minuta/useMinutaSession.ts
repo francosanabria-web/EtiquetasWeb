@@ -62,8 +62,8 @@ export function useMinutaSession(reunionId: number) {
     [pedidos],
   );
 
-  const recargar = useCallback(async () => {
-    setCargando(true);
+  const recargar = useCallback(async (opciones?: { silencioso?: boolean }) => {
+    if (!opciones?.silencioso) setCargando(true);
     setError(null);
     try {
       const r = await fetchReunion(reunionId);

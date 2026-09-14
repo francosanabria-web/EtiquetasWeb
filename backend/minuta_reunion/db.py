@@ -12,7 +12,17 @@ from pathlib import Path
 from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = Path(os.environ.get("MINUTA_DATA_DIR", BASE_DIR / "data"))
+DEFAULT_SHARE_DATA_DIR = Path(
+    r"G:\Unidades compartidas\Mantenimiento\MANTENIMIENTO  OZLA 2024-2025\17. Pañol\pañol v5.0\minuta_data"
+)
+
+
+def _default_data_dir() -> Path:
+    """Prefer the shared source of truth when available; fall back locally."""
+    return DEFAULT_SHARE_DATA_DIR if DEFAULT_SHARE_DATA_DIR.exists() else BASE_DIR / "data"
+
+
+DATA_DIR = Path(os.environ.get("MINUTA_DATA_DIR", _default_data_dir()))
 DB_PATH = Path(os.environ.get("MINUTA_DB_PATH", DATA_DIR / "minutas.db"))
 SECTORES_DIR = DATA_DIR / "sectores"
 

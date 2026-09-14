@@ -1,8 +1,8 @@
 import { NavLink } from "react-router-dom";
-import { modulosSidebar, type ModuloNav, type Rol } from "../config/navegacion";
+import { modulosSidebar, type ModuloNav, type Usuario } from "../config/navegacion";
 
 type Props = {
-  rol: Rol;
+  usuario: Usuario;
 };
 
 function ItemInterno({ mod }: { mod: ModuloNav }) {
@@ -52,8 +52,8 @@ function ItemProximo({ mod }: { mod: ModuloNav }) {
   );
 }
 
-export default function SidebarNav({ rol }: Props) {
-  const items = modulosSidebar(rol);
+export default function SidebarNav({ usuario }: Props) {
+  const items = modulosSidebar(usuario);
 
   return (
     <nav className="sidebar-nav" aria-label="Módulos del sistema">

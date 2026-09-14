@@ -1,38 +1,35 @@
-import type { Rol, Usuario } from "../config/navegacion";
+import type { PermisosUsuario, Rol, Usuario } from "../config/navegacion";
+import { PERMISOS_ROL } from "../config/usuarios_permisos";
 
 /**
  * Usuarios de demostración hasta conectar Firebase Auth / backend de cuentas.
  * NO usar en producción: reemplazar por autenticación real.
  */
+function demoUsuario(
+  id: number,
+  usuario: string,
+  nombre: string,
+  email: string,
+  clave: string,
+  rol: Rol
+): Usuario & { clave: string } {
+  return {
+    id,
+    usuario,
+    nombre,
+    email,
+    clave,
+    rol,
+    activo: true,
+    permisos: PERMISOS_ROL[rol] as PermisosUsuario,
+  };
+}
+
 export const USUARIOS_DEMO: Array<Usuario & { clave: string }> = [
-  {
-    id: "1",
-    nombre: "Administrador",
-    email: "admin@panol.local",
-    clave: "admin123",
-    rol: "admin",
-  },
-  {
-    id: "2",
-    nombre: "Pañol",
-    email: "panol@panol.local",
-    clave: "panol123",
-    rol: "panol",
-  },
-  {
-    id: "3",
-    nombre: "Supervisor",
-    email: "supervisor@panol.local",
-    clave: "supervisor123",
-    rol: "supervisor",
-  },
-  {
-    id: "4",
-    nombre: "Jefatura",
-    email: "jefatura@panol.local",
-    clave: "jefatura123",
-    rol: "jefatura",
-  },
+  demoUsuario(1, "admin", "Administrador", "admin@panol.local", "admin123", "admin"),
+  demoUsuario(2, "panol", "Pañol", "panol@panol.local", "panol123", "panol"),
+  demoUsuario(3, "supervisor", "Supervisor", "supervisor@panol.local", "supervisor123", "supervisor"),
+  demoUsuario(4, "jefatura", "Jefatura", "jefatura@panol.local", "jefatura123", "jefatura"),
 ];
 
 export function autenticarDemo(email: string, clave: string): Usuario | null {

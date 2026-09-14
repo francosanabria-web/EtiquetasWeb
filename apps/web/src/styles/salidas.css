@@ -1,0 +1,339 @@
+/* Salidas — egreso de material (variables de tema del shell) */
+
+.sal-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sal-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sal-toggle {
+  /* Override global `label { flex-direction: column }` so checkbox stays inline */
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.sal-toggle input[type="checkbox"] {
+  /* Global `input` padding/border makes checkboxes look broken */
+  width: 1.1rem;
+  height: 1.1rem;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  accent-color: var(--primary);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.sal-toggle input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.sal-ok {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary-dark);
+  border: 0.5px solid color-mix(in srgb, var(--primary) 35%, var(--border));
+}
+
+.sal-proy {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  color: var(--text);
+  border: 0.5px solid color-mix(in srgb, var(--primary) 28%, var(--border));
+}
+
+.sal-proy-warn {
+  background: color-mix(in srgb, var(--danger, #c62828) 10%, transparent);
+  border-color: color-mix(in srgb, var(--danger, #c62828) 35%, var(--border));
+  color: var(--text);
+}
+
+.sal-field input::placeholder,
+.sal-field select:invalid {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+.sal-field select:required:invalid {
+  color: var(--muted);
+}
+
+.sal-field select option {
+  color: var(--text);
+}
+
+.sal-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 420px) 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.sal-form,
+.sal-carga {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.sal-form fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-inline-size: 0;
+}
+
+.sal-form legend {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+  padding: 0;
+}
+
+.sal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--text);
+  min-width: 0;
+}
+
+.sal-field input,
+.sal-field select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-height: 44px;
+  width: 100%;
+}
+
+.sal-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.sal-row > .btn-secondary {
+  flex-shrink: 0;
+  min-height: 44px;
+}
+
+.sal-grow {
+  flex: 1;
+}
+
+.sal-readonly {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 80%, var(--surface));
+  border: 0.5px dashed var(--border);
+}
+
+.sal-readonly strong {
+  display: block;
+  font-size: 0.9rem;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.sal-muted {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.sal-form-actions,
+.sal-carga-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.sal-carga-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.sal-carga-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+}
+
+.sal-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.sal-table-wrap {
+  overflow: auto;
+  max-height: min(52vh, 480px);
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+}
+
+.sal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.sal-table th,
+.sal-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 0.5px solid var(--border);
+}
+
+.sal-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.sal-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.sal-row-dev {
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+}
+
+.sal-link-btn {
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 8px 4px;
+  min-height: 44px;
+}
+
+.sal-cards-mobile {
+  display: none;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .sal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sal-form-actions .btn-primary,
+  .sal-carga-actions .btn-primary {
+    width: 100%;
+  }
+
+  .sal-table-desktop {
+    display: none;
+  }
+
+  .sal-cards-mobile {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sal-card-item {
+    background: color-mix(in srgb, var(--bg) 70%, var(--surface));
+    border: 0.5px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+
+  .sal-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .sal-card-desc {
+    margin: 6px 0 8px;
+    font-size: 0.9rem;
+    color: var(--text);
+    word-break: break-word;
+  }
+
+  .sal-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+
+  .sal-card-meta b {
+    color: var(--text);
+  }
+
+  .sal-field {
+    font-size: 0.9rem;
+  }
+}

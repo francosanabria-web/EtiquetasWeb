@@ -59,7 +59,7 @@ export default function AppShell() {
             {collapsed ? "»" : "«"}
           </button>
         </div>
-        <SidebarNav rol={usuario.rol} />
+        <SidebarNav usuario={usuario} />
         <div className="sidebar-foot">
           <p className="user-name">{usuario.nombre}</p>
           <p className="user-role">{etiquetaRol(usuario.rol)}</p>
