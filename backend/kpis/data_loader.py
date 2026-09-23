@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Lectura SOLO LECTURA desde MariaDB (panol.salida_historial, panol.maestro_stock).
-Nunca escribe. No lee Excel ni G:\ — DB es la única fuente de datos.
+Lectura SOLO LECTURA desde MariaDB (panol.salida_historial, panol.maestro_stock, panol.salida_activos).
+Nunca escribe. No lee Excel ni G: — DB es la unica fuente de datos.
 """
 
 from __future__ import annotations
@@ -137,54 +137,69 @@ def _load_movimientos_from_db() -> pd.DataFrame:
             pass
 
 
-def _load_activos_from_excel() -> pd.DataFrame:
-    """Carga activos desde Excel (salida_activos.xlsx).
-    DB table para activos no existe aún; se mantiene como fuente separada.
+def _load_activos_from_db() -> pd.DataFrame:
+    """Carga activos desde MariaDB panol.salida_activos (DB única fuente).
+    Sin fallback a Excel — si DB no tiene datos, devuelve DataFrame vacío.
     """
-    from pathlib import Path
-
-    base = Path(r"G:\Unidades compartidas\Mantenimiento\MANTENIMIENTO  OZLA 2024-2025\17. Pañol\pañol v5.0")
-    path = base / "salida_activos.xlsx"
-    if not path.is_file():
-        return pd.DataFrame()
-
-    xls = pd.ExcelFile(path, engine="openpyxl")
-    hoja = None
-    for s in xls.sheet_names:
-        if s.strip().lower() == "fuera_de_planta":
-            hoja = s
-            break
-    if hoja is None:
-        hoja = xls.sheet_names[0]
-    df = pd.read_excel(xls, sheet_name=hoja)
-    xls.close()
-
-    # Normalizar columnas
-    alias = {
-        "NUMERO PEDIDO": "NUMERO_PEDIDO",
-        "NUMERO OC": "NUMERO_OC",
-        "NUMERO REMITO": "NUMERO_REMITO",
-        "EQUIPO REPUESTO": "EQUIPO_REPUESTO",
-        "NRO SERIE": "NRO_SERIE",
-        "FECHA SALIDA": "FECHA_SALIDA",
-        "FECHA REGRESO": "FECHA_REGRESO",
-        "ESTADO AL INGRESO": "ESTADO_AL_INGRESO",
-        "DIAS FUERA": "DIAS_FUERA",
-    }
-    ren = {c: alias.get(str(c).strip().upper(), str(c).strip().upper().replace(" ", "_")) for c in df.columns}
-    df = df.rename(columns=ren)
-    if "DIAS_FUERA" in df.columns:
-        df["DIAS_FUERA"] = pd.to_numeric(df["DIAS_FUERA"], errors="coerce").fillna(0)
-    else:
-        df["DIAS_FUERA"] = 0
-    if "SECTOR" in df.columns:
-        df["SECTOR"] = df["SECTOR"].astype(str).str.strip().str.upper()
-    df["_pendiente"] = df.apply(
-        lambda r: str(r.get("ESTADO", "")).strip().upper().replace(" ", "_") == "FUERA_DE_PLANTA"
-        or (not str(r.get("FECHA_REGRESO", "")).strip() or str(r.get("FECHA_REGRESO", "")).strip().lower() in ("", "nan", "none", "nat", "-")),
-        axis=1,
-    )
-    return df
+    conn = _get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT numero_pedido AS NUMERO_PEDIDO,
+                       numero_oc AS NUMERO_OC,
+                       numero_remito AS NUMERO_REMITO,
+                       sector AS SECTOR,
+                       codigo AS CODIGO,
+                       equipo AS EQUIPO_REPUESTO,
+                       cantidad AS CANTIDAD,
+                       nro_serie AS NRO_SERIE,
+                       fecha_salida AS FECHA_SALIDA,
+                       proveedor AS PROVEEDOR,
+                       fecha_regreso AS FECHA_REGRESO,
+                       estado_al_ingreso AS ESTADO_AL_INGRESO,
+                       observaciones AS OBSERVACIONES,
+                       dias_fuera AS DIAS_FUERA,
+                       estado AS ESTADO
+                FROM salida_activos
+                ORDER BY fecha_salida DESC, id DESC
+                """
+            )
+            rows = cur.fetchall()
+            if not rows:
+                return pd.DataFrame(
+                    columns=["NUMERO_PEDIDO", "NUMERO_OC", "NUMERO_REMITO", "SECTOR", "CODIGO",
+                             "EQUIPO_REPUESTO", "CANTIDAD", "NRO_SERIE", "FECHA_SALIDA",
+                             "PROVEEDOR", "FECHA_REGRESO", "ESTADO_AL_INGRESO", "OBSERVACIONES",
+                             "DIAS_FUERA", "ESTADO", "_pendiente"]
+                )
+            df = pd.DataFrame(rows)
+            # Normalizar tipos
+            if "DIAS_FUERA" in df.columns:
+                df["DIAS_FUERA"] = pd.to_numeric(df["DIAS_FUERA"], errors="coerce").fillna(0).astype(int)
+            else:
+                df["DIAS_FUERA"] = 0
+            if "SECTOR" in df.columns:
+                df["SECTOR"] = df["SECTOR"].astype(str).str.strip().str.upper().replace({"NAN": "", "NONE": ""})
+            # ESTADO ya viene como fuera_de_planta / ingresado_a_planta en DB
+            df["ESTADO"] = df["ESTADO"].astype(str).str.strip().str.upper()
+            # _pendiente: fuera_de_planta == FUERA_DE_PLANTA
+            df["_pendiente"] = df["ESTADO"] == "FUERA_DE_PLANTA"
+            # Asegurar columnas esperadas existan
+            for col in ["NUMERO_PEDIDO", "NUMERO_OC", "NUMERO_REMITO", "CODIGO", "EQUIPO_REPUESTO",
+                        "NRO_SERIE", "PROVEEDOR", "ESTADO_AL_INGRESO", "OBSERVACIONES"]:
+                if col not in df.columns:
+                    df[col] = ""
+                df[col] = df[col].astype(str).str.strip().replace({"nan": "", "None": "", "NaT": ""})
+            # FECHA_SALIDA / FECHA_REGRESO como datetime para compatibilidad
+            df["FECHA_SALIDA"] = pd.to_datetime(df["FECHA_SALIDA"], errors="coerce")
+            df["FECHA_REGRESO"] = pd.to_datetime(df["FECHA_REGRESO"], errors="coerce")
+            return df
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 class DataStore:
@@ -286,13 +301,15 @@ class DataStore:
             self.archivos_ok["salida_historial"] = False
             raise RedNoDisponibleError(f"No se pudieron cargar movimientos desde DB: {e}")
 
-        # ── Activos desde Excel (no hay tabla DB equivalente aún) ──
+        # ── Activos desde salida_activos (DB) ──
+        # Sin fallback a Excel — DB es única fuente (migrado 2026-09-23, 153 filas)
         try:
-            self.activos = _load_activos_from_excel()
+            self.activos = _load_activos_from_db()
             self.archivos_ok["salida_activos"] = True
-        except Exception:
+        except Exception as e:
             self.activos = pd.DataFrame()
             self.archivos_ok["salida_activos"] = False
+            raise RedNoDisponibleError(f"No se pudieron cargar activos desde DB: {e}")
 
         self.ultima_actualizacion = datetime.now(timezone.utc)
         return self.ultima_actualizacion
@@ -337,5 +354,5 @@ class DataStore:
         pass
 
     def _normalizar_activos(self) -> None:
-        """Ya no necesita — activos se cargan normalizados desde _load_activos_from_excel."""
+        """Ya no necesita — activos se cargan normalizados desde _load_activos_from_db."""
         pass
