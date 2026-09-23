@@ -152,7 +152,24 @@ def crear_personal(data: dict[str, Any]) -> dict[str, Any]:
 
     legajo = _coerce_null(data.get("legajo"))
     email = _coerce_null(data.get("email"))
-    area_id = data.get("area_id")
+    raw_area = data.get("area_id")
+    # Normalizar 0 / "0" / "" -> None (Sin área) para compat con bug frontend Number("") => 0
+    # Frontend ya envía ""/null tras fix, pero backend coerce 0 por seguridad (no 500)
+    if raw_area == "" or raw_area == 0 or raw_area == "0":
+        area_id = None
+    else:
+        area_id = raw_area
+    # Normalizar area_id a int si es != None, pero validar dentro de la transacción
+    area_id_int: int | None = None
+    if area_id is not None:
+        try:
+            area_id_int = int(area_id)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            raise ValueError(f"Area con id {area_id} no existe.")
+        if area_id_int == 0:
+            area_id = None
+            area_id_int = None
+
     tipo = str(data.get("tipo", "tecnico")).strip()
     activo = data.get("activo", True)
 
@@ -160,14 +177,16 @@ def crear_personal(data: dict[str, Any]) -> dict[str, Any]:
     if tipo not in TIPOS_VALIDOS:
         raise ValueError(f"Tipo invalido: {tipo}. Debe ser uno de {TIPOS_VALIDOS}.")
 
-    if area_id is not None:
-        area = obtener_area(int(area_id))
-        if not area:
-            raise ValueError(f"Area con id {area_id} no existe.")
-
     conn = get_connection()
     try:
         with conn.cursor() as cur:
+            # Validar área dentro de la misma conexión (evita cerrar el pool compartido)
+            if area_id is not None:
+                # area_id_int ya validado arriba (no 0, int convertible)
+                cur.execute("SELECT id FROM areas WHERE id=%s AND activo=1", (area_id_int,))
+                if not cur.fetchone():
+                    raise ValueError(f"Area con id {area_id} no existe.")
+
             cur.execute(
                 "SELECT id FROM personal WHERE UPPER(TRIM(nombre)) = %s", (nombre,)
             )
@@ -178,7 +197,7 @@ def crear_personal(data: dict[str, Any]) -> dict[str, Any]:
             cur.execute(
                 """INSERT INTO personal (legajo, nombre, email, area_id, tipo, activo)
                    VALUES (%s, %s, %s, %s, %s, %s)""",
-                (legajo, nombre, email, area_id, tipo, 1 if activo else 0),
+                (legajo, nombre, email, area_id_int, tipo, 1 if activo else 0),
             )
             conn.commit()
             cur.execute(
@@ -241,13 +260,26 @@ def actualizar_personal(personal_id: int, data: dict[str, Any]) -> dict[str, Any
                 params.append(email)
 
             if "area_id" in data:
-                area_id = data["area_id"]
-                if area_id is not None:
-                    area = obtener_area(int(area_id))
-                    if not area:
-                        raise ValueError(f"Area con id {area_id} no existe.")
+                raw_area = data["area_id"]
+                # Normalizar 0 / "0" / "" -> None (Sin área) - compat bug frontend Number("") => 0
+                if raw_area == "" or raw_area == 0 or raw_area == "0":
+                    area_id_val = None
+                else:
+                    area_id_val = raw_area
+                if area_id_val is not None:
+                    try:
+                        area_id_int = int(area_id_val)  # type: ignore[arg-type]
+                    except (TypeError, ValueError):
+                        raise ValueError(f"Area con id {area_id_val} no existe.")
+                    if area_id_int == 0:
+                        area_id_val = None
+                    else:
+                        cur.execute("SELECT id FROM areas WHERE id=%s AND activo=1", (area_id_int,))
+                        if not cur.fetchone():
+                            raise ValueError(f"Area con id {area_id_val} no existe.")
+                        area_id_val = area_id_int
                 updates.append("area_id = %s")
-                params.append(area_id)
+                params.append(area_id_val)
 
             if "tipo" in data:
                 tipo = str(data["tipo"]).strip()

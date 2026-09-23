@@ -14,7 +14,8 @@ export type ModuloId =
   | "buscador"
   | "usuarios"
   | "personal"
-  | "cajas";
+  | "cajas"
+  | "actualizacion";
 
 export type PermisosUsuario = Record<ModuloId, NivelPermiso>;
 
@@ -43,10 +44,13 @@ export function etiquetaRol(rol: Rol): string {
 
 export type TipoAcceso = "interno" | "externo" | "proximo";
 
+// TODO: migrar a lucide-react cuando se actualice el contrato del icono (out of scope Fase 2)
+// Se mantiene emoji (🧰 etc.) para consistencia con .nav-icon y .mod-icon centrados. Ver HubVisualPolish spec.
 export type ModuloNav = {
   id: ModuloId;
   titulo: string;
   descripcion: string;
+  // icono emoji — TODO: migrar a lucide-react cuando se actualice el contrato del icono (out of scope Fase 2)
   icono: string;
   /** Ruta interna del shell (react-router). */
   ruta?: string;
@@ -167,12 +171,22 @@ export const MODULOS: ModuloNav[] = [
   },
   {
     id: "cajas",
-    titulo: "Cajas",
-    descripcion: "Gestión de cajas, herramientas e inventarios mensuales.",
-    icono: "Inventory2",
+    titulo: "Cajas de Herramientas",
+    descripcion: "Caja ideal, inventario por técnico y KPIs de cumplimiento.",
+    icono: "🧰",
     ruta: "/admin/cajas",
     tipo: "interno",
     roles: ["admin", "panol", "supervisor", "jefatura"],
+    enSidebar: true,
+  },
+  {
+    id: "actualizacion",
+    titulo: "Actualización y datos",
+    descripcion: "Actualizar maestro de stock desde Excel (valorizado/detallado)",
+    icono: "🔄",
+    ruta: "/actualizacion",
+    tipo: "interno",
+    roles: ["admin", "panol"],
     enSidebar: true,
   },
   {

@@ -22,6 +22,7 @@ export const PERMISOS_ROL: Record<Rol, PermisosPorRol> = {
     usuarios: "escritura",
     personal: "escritura",
     cajas: "escritura",
+    actualizacion: "escritura",
   },
   panol: {
     inicio: "escritura",
@@ -36,6 +37,7 @@ export const PERMISOS_ROL: Record<Rol, PermisosPorRol> = {
     usuarios: "sin_acceso",
     personal: "escritura",
     cajas: "escritura",
+    actualizacion: "escritura",
   },
   supervisor: {
     inicio: "consulta",
@@ -50,6 +52,7 @@ export const PERMISOS_ROL: Record<Rol, PermisosPorRol> = {
     usuarios: "sin_acceso",
     personal: "escritura",
     cajas: "consulta",
+    actualizacion: "sin_acceso",
   },
   jefatura: {
     inicio: "consulta",
@@ -64,6 +67,7 @@ export const PERMISOS_ROL: Record<Rol, PermisosPorRol> = {
     usuarios: "sin_acceso",
     personal: "consulta",
     cajas: "consulta",
+    actualizacion: "sin_acceso",
   },
 };
 

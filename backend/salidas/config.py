@@ -58,6 +58,10 @@ SALIDAS_DB_ENABLED = os.environ.get("SALIDAS_DB_ENABLED", "0").strip().lower() n
     "0", "false", "no", "off", ""
 )
 
+SALIDAS_EXCEL_BACKUP = os.environ.get("SALIDAS_EXCEL_BACKUP", "0").strip().lower() not in (
+    "0", "false", "no", "off", ""
+)
+
 # Maestro (artículos + config). En planta: master_codes.xlsx (como el escritorio).
 MAESTRO_PRIMARY = "base_datos.xlsx"  # solo data_prueba / legacy
 MAESTRO_LEGACY = "master_codes.xlsx"
@@ -121,6 +125,10 @@ COLUMNAS_MOVIMIENTO = [
 
 # Sync Firebase: pull opcional. Write al confirmar = OFF por decisión 2026-08-05.
 HORA_SYNC_FIREBASE = int(os.environ.get("SALIDAS_SYNC_HORA", "8"))
+# Alias bidirectional Firestore <-> DB daily sync hour (America/Argentina/Buenos_Aires)
+ALIAS_SYNC_HORA = int(
+    os.environ.get("ALIAS_SYNC_HORA", os.environ.get("SALIDAS_ALIAS_SYNC_HORA", "3"))
+)
 FIREBASE_WRITE_ENABLED = os.environ.get("SALIDAS_FIREBASE_WRITE", "0").strip() not in (
     "0",
     "false",
@@ -135,6 +143,46 @@ PERSONAL_DB_ENABLED = os.environ.get("PERSONAL_DB_ENABLED", "0").strip() not in 
     "False",
     "no",
 )
+
+# Escritura diaria: si false (default), append_movimientos solo escribe
+# historial_path (master_salidas.xlsx / salida_historial) y NO genera
+# salidas_DD-MM-AAAA.xlsx diarios. El diario pasa a ser export on-demand
+# desde salida_historial (fuente unica). Beneficios: menos fragmentacion,
+# sin cientos de archivos, backup/restore simple, menos locks .lock en Drive,
+# mas facil auditoria. Ver salidas_esquema.md seccion "Fuente unica y diarios".
+SALIDAS_ESCRIBIR_DIARIO = os.environ.get("SALIDAS_ESCRIBIR_DIARIO", "0").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+    "",
+)
+
+# Atenciones ventanilla - config export
+ATENCIONES_EXPORT_MAX_ROWS = int(os.environ.get("ATENCIONES_EXPORT_MAX_ROWS", "10000"))
+# v4 simplificado: solo fecha, con_retiro, observaciones
+# Catalogo motivos ya no se usa (tabla salida_atencion_motivos DROP en v4)
+# Mantener fallback vacio por compat pero no exponer motivos en UI
+ATENCIONES_MOTIVOS_SIN_RETIRO: tuple[str, ...] = ()
+ATENCIONES_COLUMNAS_EXPORT = [
+    "FECHA",
+    "CON_RETIRO",
+    "OBSERVACIONES",
+    "ATENDIDO_POR",
+]
+# Columnas legacy para compat export si tabla vieja aun tiene columnas extra
+ATENCIONES_COLUMNAS_EXPORT_LEGACY = [
+    "FECHA",
+    "HORA",
+    "PERSONA_SOLICITANTE",
+    "SECTOR",
+    "CON_RETIRO",
+    "MOTIVO_SIN_RETIRO",
+    "CANTIDAD_ITEMS_SOLICITADOS",
+    "ORDEN_REFERENCIA",
+    "OBSERVACIONES",
+    "ATENDIDO_POR",
+]
 
 
 def panol_base() -> Path:

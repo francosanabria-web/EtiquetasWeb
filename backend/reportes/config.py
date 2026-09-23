@@ -66,11 +66,21 @@ COLUMNAS_DETALLE_GASTOS = [
 
 COLUMNAS_EXPORT_TABLA = COLUMNAS_DETALLE_GASTOS + ["SECTOR"]
 
-# ── Mail diario / mensual (scaffold; DESACTIVADO por defecto) ──────────────
+# ── Feature flag DB (cuando 1, reportes lee salida_historial; fallback Excel) ─
 def _env_flag(name: str, default: str = "0") -> bool:
     return os.environ.get(name, default).strip().lower() not in ("0", "false", "no", "off", "")
 
 
+REPORTES_DB_ENABLED = _env_flag("REPORTES_DB_ENABLED", "0")
+# Compat: si SALIDAS_DB_ENABLED=1 y REPORTES_DB_ENABLED no seteado explícitamente, heredar?
+# Se respeta REPORTES_DB_ENABLED como autoridad; el start script lo setea a 1.
+REPORTES_DB_HOST = os.environ.get("REPORTES_DB_HOST", os.environ.get("SALIDAS_DB_HOST", os.environ.get("DB_HOST", "127.0.0.1")))
+REPORTES_DB_PORT = int(os.environ.get("REPORTES_DB_PORT", os.environ.get("SALIDAS_DB_PORT", os.environ.get("DB_PORT", "3306"))))
+REPORTES_DB_USER = os.environ.get("REPORTES_DB_USER", os.environ.get("SALIDAS_DB_USER", os.environ.get("DB_USER", "root")))
+REPORTES_DB_PASSWORD = os.environ.get("REPORTES_DB_PASSWORD", os.environ.get("SALIDAS_DB_PASSWORD", os.environ.get("DB_PASSWORD", "")))
+REPORTES_DB_NAME = os.environ.get("REPORTES_DB_NAME", os.environ.get("SALIDAS_DB_NAME", os.environ.get("DB_NAME", "panol")))
+
+# ── Mail diario / mensual (scaffold; DESACTIVADO por defecto) ──────────────
 REPORTES_MAIL_DIARIO_ENABLED = _env_flag("REPORTES_MAIL_DIARIO_ENABLED", "0")
 REPORTES_MAIL_MENSUAL_ENABLED = _env_flag("REPORTES_MAIL_MENSUAL_ENABLED", "0")
 REPORTES_MAIL_DIARIO_HORA = os.environ.get("REPORTES_MAIL_DIARIO_HORA", "07:30").strip()

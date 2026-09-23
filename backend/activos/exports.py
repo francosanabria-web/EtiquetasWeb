@@ -18,30 +18,21 @@ _AMARILLO = "FFEB9C"
 _ROJO = "FFC7CE"
 
 _COLUMNAS_FUERA = [
-    ("equipo", "Equipo / repuesto"),
-    ("codigo", "Código"),
-    ("remito", "Nº remito"),
-    ("n_pedido", "Nº pedido"),
-    ("n_oc", "Nº OC"),
-    ("sector", "Sector"),
     ("dias_fuera", "Días fuera"),
+    ("equipo", "Equipo / repuesto"),
+    ("cantidad", "Cantidad"),
+    ("observaciones", "Observaciones"),
     ("proveedor", "Proveedor"),
-    ("fecha_salida", "Fecha salida"),
-    ("estado", "Estado"),
+    ("sector", "Sector"),
 ]
 
 _COLUMNAS_ING = [
+    ("dias_fuera", "Días fuera"),
     ("equipo", "Equipo / repuesto"),
-    ("codigo", "Código"),
-    ("remito", "Nº remito"),
-    ("n_pedido", "Nº pedido"),
-    ("n_oc", "Nº OC"),
-    ("sector", "Sector"),
-    ("dias_fuera", "Días"),
+    ("cantidad", "Cantidad"),
+    ("observaciones", "Observaciones"),
     ("proveedor", "Proveedor"),
-    ("fecha_salida", "Salida"),
-    ("fecha_regreso", "Regreso"),
-    ("estado_al_ingreso", "Estado ingreso"),
+    ("sector", "Sector"),
 ]
 
 
@@ -134,6 +125,12 @@ def activos_excel(store: ActivosStore, vista: Vista = "fuera") -> bytes:
                 val: Any = _estado_legible(str(it.get(key, "") or ""))
             elif key == "dias_fuera":
                 val = dias
+            elif key == "cantidad":
+                try:
+                    v = it.get(key)
+                    val = int(float(v)) if v not in (None, "", "—") else 1
+                except Exception:
+                    val = it.get(key) or "—"
             else:
                 val = it.get(key) or "—"
             c = ws.cell(row=fila, column=col, value=val)
@@ -141,13 +138,18 @@ def activos_excel(store: ActivosStore, vista: Vista = "fuera") -> bytes:
                 c.fill = PatternFill("solid", fgColor=color)
             c.border = borde
             c.alignment = Alignment(
-                horizontal="center" if key in ("dias_fuera", "sector") else "left",
+                horizontal="center" if key in ("dias_fuera", "cantidad", "sector") else "left",
                 vertical="center",
             )
 
     for i in range(1, n_cols + 1):
         ws.column_dimensions[get_column_letter(i)].width = 16
-    ws.column_dimensions["A"].width = 32
+    # Equipo / repuesto is now column B (dias_fuera is A) — give it more width
+    if n_cols >= 2:
+        ws.column_dimensions["A"].width = 14
+        ws.column_dimensions["B"].width = 34
+    else:
+        ws.column_dimensions["A"].width = 32
 
     out = BytesIO()
     wb.save(out)
@@ -179,12 +181,20 @@ def activos_pdf(store: ActivosStore, vista: Vista = "fuera") -> bytes:
     pdf.cell(0, 6, s(meta["subtitulo"]), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
 
-    # Anchos adaptados a cantidad de columnas
+    # Anchos adaptados a cantidad de columnas — priorizar Equipo / repuesto (col 1 = Días, col 2 = Equipo)
     n = len(columnas)
     usable = 277
-    # Priorizar equipo
     widths = [usable / n] * n
-    if n >= 1:
+    if n >= 2:
+        # Equipo es columna 1 (índice 1) tras Días fuera
+        widths[1] = min(78, usable * 0.30)
+        widths[0] = min(22, usable * 0.10)  # Días fuera angosto
+        resto = usable - widths[0] - widths[1]
+        otros = n - 2
+        if otros > 0:
+            for i in range(2, n):
+                widths[i] = resto / otros
+    elif n >= 1:
         widths[0] = min(58, usable * 0.22)
         resto = usable - widths[0]
         for i in range(1, n):
@@ -215,9 +225,18 @@ def activos_pdf(store: ActivosStore, vista: Vista = "fuera") -> bytes:
                 val = s(_estado_legible(str(it.get(key, "") or "")), 18)
             elif key == "dias_fuera":
                 val = str(dias)
+            elif key == "cantidad":
+                try:
+                    v = it.get(key)
+                    val = str(int(float(v))) if v not in (None, "", "—") else "1"
+                except Exception:
+                    val = s(it.get(key), 8)
+            elif key == "observaciones":
+                val = s(it.get(key), 32)
             else:
                 val = s(it.get(key), 28 if key == "equipo" else 14)
-            pdf.cell(w, 6, val, border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
+            align = "C" if key in ("dias_fuera", "cantidad", "sector") else "L"
+            pdf.cell(w, 6, val, border=1, fill=True, align=align, new_x=XPos.RIGHT, new_y=YPos.TOP)
         pdf.ln()
 
     out = BytesIO()

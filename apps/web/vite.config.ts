@@ -60,6 +60,13 @@ const proxySalidas = {
   },
 };
 
+const proxyMaestroStock = {
+  "/api/maestro-stock": {
+    target: "http://127.0.0.1:8018",
+    ...proxyOpts,
+  },
+};
+
 const proxyPersonal = {
   "/api/personal": {
     target: "http://127.0.0.1:8019",
@@ -91,6 +98,7 @@ const serverOpts = {
     ...proxyActivos,
     ...proxyReportes,
     ...proxySalidas,
+    ...proxyMaestroStock,
     ...proxyPersonal,
     ...proxyCajas,
   },

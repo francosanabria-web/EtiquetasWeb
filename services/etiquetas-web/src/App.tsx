@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { API_URL, ApiError, buscarCatalogo, crearEtiqueta, getPendientes } from "./api";
 import type { CatalogoItem, Pedido, TipoEtiqueta } from "./types";
+import Configuracion from "./pages/Configuracion";
 
 type Aviso = { tipo: "ok" | "error"; texto: string } | null;
 
@@ -14,7 +15,48 @@ function useSolicitante() {
   return [valor, setValor] as const;
 }
 
+function isConfigPath(p: string) {
+  return p === "/configuracion" || p.startsWith("/configuracion/");
+}
+
+function navigate(path: string) {
+  window.history.pushState(null, "", path);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
 export default function App() {
+  const [path, setPath] = useState(() => window.location.pathname);
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  if (isConfigPath(path)) {
+    return (
+      <div className="app">
+        <header className="topbar">
+          <div className="topbar-inner">
+            <h1>⚙️ Configuración — Pañol</h1>
+            <button type="button" className="btn-secundario btn-sm" onClick={() => navigate("/")}>
+              ← Etiquetas
+            </button>
+          </div>
+        </header>
+        <main className="contenido">
+          <Configuracion />
+        </main>
+        <footer className="pie">
+          Configuración maestro_stock · API Salidas: <code>{(import.meta.env.VITE_SALIDAS_API_URL as string) ?? (import.meta.env.VITE_API_URL as string) ?? "http://localhost:8018"}</code>
+        </footer>
+      </div>
+    );
+  }
+
+  return <EtiquetasApp onNavigateConfig={() => navigate("/configuracion")} />;
+}
+
+function EtiquetasApp({ onNavigateConfig }: { onNavigateConfig: () => void }) {
   const [tipo, setTipo] = useState<TipoEtiqueta>("codigo");
   const [solicitante, setSolicitante] = useSolicitante();
   const [aviso, setAviso] = useState<Aviso>(null);
@@ -29,12 +71,17 @@ export default function App() {
       <header className="topbar">
         <div className="topbar-inner">
           <h1>🏷️ Etiquetas — Pañol</h1>
-          <input
-            className="solicitante"
-            placeholder="¿Quién imprime? (ej. tablet-pañol)"
-            value={solicitante}
-            onChange={(e) => setSolicitante(e.target.value)}
-          />
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              className="solicitante"
+              placeholder="¿Quién imprime? (ej. tablet-pañol)"
+              value={solicitante}
+              onChange={(e) => setSolicitante(e.target.value)}
+            />
+            <button type="button" className="btn-secundario btn-sm" onClick={onNavigateConfig} title="Ir a Configuración">
+              ⚙️ Config
+            </button>
+          </div>
         </div>
       </header>
 
@@ -64,7 +111,7 @@ export default function App() {
       </main>
 
       <footer className="pie">
-        Conectado a la API: <code>{API_URL}</code>
+        Conectado a la API: <code>{API_URL}</code> · <button type="button" className="link-btn" onClick={onNavigateConfig}>⚙️ Configuración</button>
       </footer>
 
       {aviso && <div className={`toast toast-${aviso.tipo}`}>{aviso.texto}</div>}

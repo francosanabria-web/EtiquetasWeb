@@ -49,7 +49,7 @@ export function resumenUltima(u: UltimaImpresion): string {
   return u.codigo;
 }
 
-export function etiquetaTipo(tipo: TipoEtiqueta): string {
+export function etiquetaTipo(tipo: TipoEtiqueta | string): string {
   switch (tipo) {
     case "simple":
       return "Rótulo";
@@ -57,5 +57,7 @@ export function etiquetaTipo(tipo: TipoEtiqueta): string {
       return "Código";
     case "mercaderia_nueva":
       return "Mercadería";
+    default:
+      return String(tipo);
   }
 }

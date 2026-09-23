@@ -628,11 +628,11 @@ class AlmacenApp:
 
     def _tabla_html_coloreada(self, titulo, cabeceras, filas, leyenda_dias=True):
         """Tabla HTML donde cada fila trae su color de fondo.
-        `filas` = lista de tuplas (bg_hex, (celda1, celda2, ...))."""
+        `filas` = lista de tuplas (bg_hex, (celda1, celda2, ...)). Header fijo (sticky)."""
         esc = html.escape
         borde = '#999'
         th = ''.join(
-            f'<th style="padding:6px;background:#1F4E78;color:#fff;border:1px solid {borde};">'
+            f'<th style="padding:6px;background:#1F4E78;color:#fff;border:1px solid {borde};position:sticky;top:0;z-index:1;">'
             f'{esc(str(h))}</th>'
             for h in cabeceras
         )
@@ -1307,32 +1307,24 @@ class AlmacenApp:
         filas_html = []
         for _idx, row, dias in pendientes:
             lineas_txt.append(
-                f"  • {self._etiqueta_equipo_seguimiento(row)} | Sector: {self._texto_ui(row.get('SECTOR'))} | "
-                f"Pedido: {self._texto_ui(row.get('NUMERO_PEDIDO'))} | "
-                f"OC: {self._texto_ui(row.get('NUMERO_OC'))} | Remito: {self._texto_ui(row.get('NUMERO_REMITO'))} | "
-                f"Salida: {self._fecha_sin_hora_str(row.get('FECHA_SALIDA'))} | "
-                f"Proveedor: {self._texto_ui(row.get('PROVEEDOR'))} | Días fuera de planta: {dias}"
+                f"  • Días fuera: {dias} | Equipo: {self._texto_ui(row.get('EQUIPO_REPUESTO'))} | "
+                f"Cantidad: {self._normalizar_cantidad_seguimiento(row.get('CANTIDAD'))} | "
+                f"Observaciones: {self._texto_ui(row.get('OBSERVACIONES')) or '—'} | "
+                f"Proveedor: {self._texto_ui(row.get('PROVEEDOR'))} | Sector: {self._texto_ui(row.get('SECTOR'))}"
             )
             filas_html.append((
                 self._color_dias_fuera(dias),
                 (
+                    dias,
                     self._texto_ui(row.get("EQUIPO_REPUESTO")),
                     str(self._normalizar_cantidad_seguimiento(row.get("CANTIDAD"))),
-                    self._texto_ui(row.get("CODIGO")),
-                    self._texto_ui(row.get("NRO_SERIE")),
-                    self._texto_ui(row.get("SECTOR")),
-                    self._texto_ui(row.get("NUMERO_PEDIDO")),
-                    self._texto_ui(row.get("NUMERO_OC")),
-                    self._texto_ui(row.get("NUMERO_REMITO")),
-                    self._fecha_sin_hora_str(row.get("FECHA_SALIDA")),
-                    self._texto_ui(row.get("PROVEEDOR")),
-                    dias,
                     self._texto_ui(row.get("OBSERVACIONES")),
+                    self._texto_ui(row.get("PROVEEDOR")),
+                    self._texto_ui(row.get("SECTOR")),
                 ),
             ))
         cab = [
-            "Equipo/repuesto", "Cant.", "Código", "Nº serie", "Sector", "Nº pedido", "Nº OC", "Nº remito",
-            "Fecha salida", "Proveedor", "Días fuera de planta", "Fallas/Observaciones",
+            "Días fuera", "Equipo / repuesto", "Cantidad", "Observaciones", "Proveedor", "Sector",
         ]
         html_body = self._tabla_html_coloreada(
             "Equipos fuera de planta (ordenados por días, con código de color)",

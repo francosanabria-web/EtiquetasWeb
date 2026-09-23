@@ -23,6 +23,18 @@ def _norm_text(val: object) -> str:
     return "" if s.lower() in ("nan", "none", "nat") else s
 
 
+def _norm_cantidad(val: object) -> int:
+    try:
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return 1
+        s = str(val).strip().replace(",", ".")
+        if not s or s.lower() in ("nan", "-", ""):
+            return 1
+        return max(1, int(float(s)))
+    except (TypeError, ValueError):
+        return 1
+
+
 def _row_to_item(row: pd.Series, *, fuera: bool) -> dict[str, Any]:
     sheet_row = row.get("_sheet_row")
     try:
@@ -41,6 +53,7 @@ def _row_to_item(row: pd.Series, *, fuera: bool) -> dict[str, Any]:
         "equipo": _norm_text(row.get("EQUIPO_REPUESTO", "")),
         "sector": _norm_text(row.get("SECTOR", "")),
         "dias_fuera": int(float(row.get("DIAS_FUERA", 0) or 0)),
+        "cantidad": _norm_cantidad(row.get("CANTIDAD", 1)),
         "estado": _norm_text(row.get("ESTADO", "")),
         "proveedor": _norm_text(row.get("PROVEEDOR", "")),
         "remito": _norm_doc(row.get("NUMERO_REMITO", "")),

@@ -25,13 +25,148 @@ import drive_source
 from config import COLUMNAS, HOJA_MOVIMIENTOS, movimientos_path
 
 try:
-    from config import DEFAULT_PROD_BASE  # type: ignore
+    from config import (
+        DEFAULT_PROD_BASE,  # type: ignore
+        REPORTES_DB_ENABLED,
+        REPORTES_DB_HOST,
+        REPORTES_DB_NAME,
+        REPORTES_DB_PASSWORD,
+        REPORTES_DB_PORT,
+        REPORTES_DB_USER,
+    )
 except Exception:  # fallback if config changes
     DEFAULT_PROD_BASE = Path(
         r"G:\Unidades compartidas\Mantenimiento\MANTENIMIENTO  OZLA 2024-2025\17. Pañol\pañol v5.0"
     )
+    REPORTES_DB_ENABLED = False
+    REPORTES_DB_HOST = "127.0.0.1"
+    REPORTES_DB_PORT = 3306
+    REPORTES_DB_USER = "root"
+    REPORTES_DB_PASSWORD = ""
+    REPORTES_DB_NAME = "panol"
+
+# Alias for backward compat with older config that may not expose DB vars
+try:
+    _ = REPORTES_DB_ENABLED
+except NameError:
+    REPORTES_DB_ENABLED = False
 
 log = logging.getLogger("reportes.store")
+
+
+# ── DB helpers ────────────────────────────────────────────────────────────
+
+def _db_enabled() -> bool:
+    try:
+        return bool(REPORTES_DB_ENABLED)
+    except Exception:
+        return False
+
+
+def _cargar_df_desde_db() -> pd.DataFrame:
+    """Carga DataFrame desde salida_historial (solo filas activas).
+
+    Mapea columnas snake_case DB -> COLUMNAS reportes (UPPER).
+    Retorna DataFrame con COLUMNAS + _fecha, o DataFrame vacío si no hay filas.
+    Lanza excepción si DB no disponible (para fallback a Excel).
+    """
+    import pymysql
+
+    conn = pymysql.connect(
+        host=REPORTES_DB_HOST,
+        port=int(REPORTES_DB_PORT),
+        user=REPORTES_DB_USER,
+        password=REPORTES_DB_PASSWORD,
+        database=REPORTES_DB_NAME,
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+    )
+    try:
+        with conn.cursor() as cur:
+            # Check table exists quickly
+            cur.execute("SELECT COUNT(*) AS c FROM salida_historial WHERE COALESCE(anulado,0)=0 LIMIT 1")
+            # Real load - all active rows (September bulk is ~766, full history maybe few K)
+            cur.execute(
+                """
+                SELECT fecha, mes, anio, codigo, descripcion, ubicacion, cantidad,
+                       tipo_comprobante, numero_orden, maquina_sitio,
+                       precio_unitario, monto_total,
+                       operario_nombre, sector_nombre
+                FROM salida_historial
+                WHERE COALESCE(anulado,0)=0
+                ORDER BY fecha DESC, id DESC
+                LIMIT 200000
+                """
+            )
+            rows = cur.fetchall()
+            if not rows:
+                return pd.DataFrame(columns=COLUMNAS + ["_fecha"])
+            records: list[dict[str, Any]] = []
+            for r in rows:
+                fv = r.get("fecha")
+                if isinstance(fv, datetime):
+                    fv_date = fv.date()
+                    fecha_iso = fv_date.isoformat()
+                    fecha_ts = pd.Timestamp(fv_date)
+                elif hasattr(fv, "isoformat"):
+                    try:
+                        fecha_iso = fv.isoformat()  # date
+                        fecha_ts = pd.Timestamp(fv)
+                    except Exception:
+                        fecha_iso = str(fv)
+                        fecha_ts = pd.to_datetime(fecha_iso, errors="coerce")
+                else:
+                    fecha_iso = str(fv or "")
+                    fecha_ts = pd.to_datetime(fecha_iso, errors="coerce")
+                mes = str(r.get("mes") or "").strip()
+                anio = str(r.get("anio") or "").strip()
+                # fallback if mes/anio empty
+                if not mes or mes.lower() in ("none", "nan", "0") and not pd.isna(fecha_ts):
+                    try:
+                        m = int(pd.Timestamp(fecha_ts).month)
+                        # replica nombre_mes from salidas config
+                        _meses = {1:"Enero.",2:"Febrero.",3:"Marzo.",4:"Abril.",5:"Mayo.",6:"Junio.",7:"Julio.",8:"Agosto.",9:"Septiembre.",10:"Octubre.",11:"Noviembre.",12:"Diciembre."}
+                        mes = _meses.get(m, "")
+                    except Exception:
+                        pass
+                if (not anio or anio.lower() in ("none","nan","0")) and not pd.isna(fecha_ts):
+                    try:
+                        anio = str(int(pd.Timestamp(fecha_ts).year))
+                    except Exception:
+                        pass
+                rec = {
+                    "FECHA": fecha_iso,
+                    "_fecha": fecha_ts,
+                    "MES": mes,
+                    "AÑO": anio,
+                    "CODIGO": str(r.get("codigo") or "").strip().upper(),
+                    "DESCRIPCION": str(r.get("descripcion") or "").strip().upper(),
+                    "UBICACION": str(r.get("ubicacion") or "").strip().upper(),
+                    "CANTIDAD": float(r.get("cantidad") or 0),
+                    "TIPO_COMPROBANTE": str(r.get("tipo_comprobante") or "").strip().upper(),
+                    "NUMERO_ORDEN": str(r.get("numero_orden") or "").strip(),
+                    "MAQUINA_SITIO": str(r.get("maquina_sitio") or "").strip().upper(),
+                    "PRECIO_UNITARIO": float(r.get("precio_unitario") or 0),
+                    "MONTO_TOTAL_SALIDA": float(r.get("monto_total") or 0),
+                    "OPERARIO": str(r.get("operario_nombre") or "").strip().upper(),
+                    "SECTOR": str(r.get("sector_nombre") or "").strip().upper(),
+                }
+                # PAÑ normalization
+                if rec["TIPO_COMPROBANTE"] in ("PAÑ", "PAN", "PANOL"):
+                    rec["TIPO_COMPROBANTE"] = "PAÑOL"
+                records.append(rec)
+            df = pd.DataFrame(records, columns=COLUMNAS + ["_fecha"])
+            # ensure _fecha is datetime64
+            df["_fecha"] = pd.to_datetime(df["FECHA"], errors="coerce")
+            # Ensure numeric
+            for col in ("CANTIDAD", "PRECIO_UNITARIO", "MONTO_TOTAL_SALIDA"):
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+            return df
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _file_mtime(path: Path) -> float | None:
@@ -521,6 +656,8 @@ class ReportesStore:
 
     def _ensure_fresh(self) -> None:
         """Lazy mtime check: auto-reload if master or any daily changed.
+        En modo DB (REPORTES_DB_ENABLED=1) verifica COUNT en salida_historial
+        para detectar inserciones (bulk o live) sin depender de mtimes.
 
         Runs on each request (require_loaded / ensure_loaded) and also from
         the 60s poll loop in main.py.
@@ -533,6 +670,52 @@ class ReportesStore:
         if self.ultima_actualizacion is None:
             return
         if self._cargando:
+            return
+        # ── DB mode: poll COUNT to detect new rows (no mtime/Drive needed) ──
+        if _db_enabled():
+            try:
+                import pymysql
+
+                conn = pymysql.connect(
+                    host=REPORTES_DB_HOST,
+                    port=int(REPORTES_DB_PORT),
+                    user=REPORTES_DB_USER,
+                    password=REPORTES_DB_PASSWORD,
+                    database=REPORTES_DB_NAME,
+                    charset="utf8mb4",
+                    cursorclass=pymysql.cursors.DictCursor,
+                )
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT COUNT(*) AS c FROM salida_historial WHERE COALESCE(anulado,0)=0")
+                        row = cur.fetchone()
+                        cnt = int(row["c"] if row and "c" in row else 0)
+                        if cnt != int(len(self.df)):
+                            log.info("Reportes: DB count changed %d -> %d, recargando desde DB...", len(self.df), cnt)
+                            # snapshot old for rollback on error
+                            snapshot_df = self.df.copy()
+                            snapshot_ok = self.archivo_ok
+                            snapshot_path = self.path_usado
+                            snapshot_ts = self.ultima_actualizacion
+                            snapshot_err = self._error_carga
+                            try:
+                                self.refresh()
+                            except Exception as e:
+                                with self._lock:
+                                    self.df = snapshot_df
+                                    self.archivo_ok = snapshot_ok
+                                    self.path_usado = snapshot_path
+                                    self.ultima_actualizacion = snapshot_ts
+                                    self._error_carga = snapshot_err
+                                    self._cargando = False
+                                log.warning("Reportes: auto-refresh DB falló, se siguen sirviendo datos viejos: %s", e)
+                finally:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+            except Exception as e:
+                log.debug("Reportes: check DB freshness ignorado: %s", e)
             return
         try:
             path = movimientos_path()
@@ -664,6 +847,27 @@ class ReportesStore:
         with self._lock:
             self._cargando = True
             self._error_carga = None
+            # ── Intento DB primero si flag activo ──
+            if _db_enabled():
+                try:
+                    df_db = _cargar_df_desde_db()
+                    # Si DB tiene datos, usar DB (aunque sea 0? fallback a Excel si vacía)
+                    if df_db is not None and not df_db.empty:
+                        self.df = df_db
+                        self.archivo_ok = True
+                        self.path_usado = f"db:{REPORTES_DB_NAME}.salida_historial"
+                        # reset mtimes para no confundir fallback
+                        self._last_mtime = None
+                        self._last_diarios_mtime = None
+                        self._last_drive_etag = None
+                        self.ultima_actualizacion = datetime.now(timezone.utc)
+                        log.info("Reportes: cargado desde DB salida_historial (%d filas) [REPORTES_DB_ENABLED=1]", len(df_db))
+                        return self.ultima_actualizacion
+                    else:
+                        log.info("Reportes: DB vacía o sin filas activas (%s), fallback a Excel", len(df_db) if df_db is not None else "None")
+                except Exception as e:
+                    log.warning("Reportes: DB load falló, fallback a Excel: %s", e)
+                    # no raise, continúa a Excel
             path = movimientos_path()
             use_drive = drive_source.is_enabled()
             try:
@@ -718,10 +922,14 @@ class ReportesStore:
                 self._cargando = False
 
     def meta(self) -> dict[str, Any]:
-        return {
+        base = {
             "archivo_ok": self.archivo_ok,
             "path": self.path_usado or str(movimientos_path()),
             "filas": int(len(self.df)),
             "ultima_actualizacion": self.timestamp_iso(),
             "error": self._error_carga,
+            "db_enabled": bool(_db_enabled()),
+            "fuente": "db" if str(self.path_usado).startswith("db:") else ("drive" if str(self.path_usado).startswith("drive:") else "excel"),
         }
+        # compat keys for older frontends
+        return base

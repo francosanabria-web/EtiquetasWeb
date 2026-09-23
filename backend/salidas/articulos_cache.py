@@ -37,12 +37,26 @@ def init_db() -> None:
                 desc       TEXT NOT NULL DEFAULT '',
                 stock      REAL NOT NULL DEFAULT 0,
                 ubicacion  TEXT NOT NULL DEFAULT '',
-                categoria  TEXT NOT NULL DEFAULT 'GENERAL'
+                categoria  TEXT NOT NULL DEFAULT 'GENERAL',
+                alias      TEXT DEFAULT NULL
             );
             """
         )
+        # Migration for existing DBs without alias column
+        try:
+            cur = conn.execute("SELECT alias FROM articulos LIMIT 1")
+            cur.fetchone()
+        except Exception as e:
+            if "no such column" in str(e).lower():
+                try:
+                    conn.execute("ALTER TABLE articulos ADD COLUMN alias TEXT DEFAULT NULL")
+                except Exception:
+                    pass
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_salidas_art_codigo ON articulos (codigo);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_salidas_art_alias ON articulos (alias);"
         )
         conn.execute(
             """
@@ -107,29 +121,56 @@ def marcar_pull(cuando: datetime) -> None:
 
 def cargar_todos() -> list[dict[str, Any]]:
     with _conectar() as conn:
-        filas = conn.execute(
-            "SELECT doc_id, codigo, desc, stock, ubicacion, categoria FROM articulos;"
-        ).fetchall()
-    return [
-        {
-            "doc_id": f["doc_id"],
-            "codigo": f["codigo"],
-            "desc": f["desc"],
-            "stock": float(f["stock"] or 0),
-            "ubicacion": f["ubicacion"],
-            "categoria": f["categoria"],
-        }
-        for f in filas
-    ]
+        # Try with alias, fallback without for old DBs mid-migration
+        try:
+            filas = conn.execute(
+                "SELECT doc_id, codigo, desc, stock, ubicacion, categoria, alias FROM articulos;"
+            ).fetchall()
+            has_alias = True
+        except Exception as e:
+            if "no such column" in str(e).lower():
+                filas = conn.execute(
+                    "SELECT doc_id, codigo, desc, stock, ubicacion, categoria FROM articulos;"
+                ).fetchall()
+                has_alias = False
+            else:
+                raise
+    out = []
+    for f in filas:
+        try:
+            alias_v = f["alias"] if has_alias and "alias" in f.keys() else None
+        except Exception:
+            alias_v = None
+        out.append(
+            {
+                "doc_id": f["doc_id"],
+                "codigo": f["codigo"],
+                "desc": f["desc"],
+                "stock": float(f["stock"] or 0),
+                "ubicacion": f["ubicacion"],
+                "categoria": f["categoria"],
+                "alias": str(alias_v).strip() if alias_v is not None and str(alias_v).strip() != "" else None,
+            }
+        )
+    return out
 
 
 def reemplazar_todo(items: list[dict[str, Any]], cuando: datetime) -> None:
     with _conectar() as conn:
+        # Ensure alias column exists
+        try:
+            conn.execute("SELECT alias FROM articulos LIMIT 1")
+        except Exception as e:
+            if "no such column" in str(e).lower():
+                try:
+                    conn.execute("ALTER TABLE articulos ADD COLUMN alias TEXT DEFAULT NULL")
+                except Exception:
+                    pass
         conn.execute("DELETE FROM articulos;")
         conn.executemany(
             """
-            INSERT INTO articulos (doc_id, codigo, desc, stock, ubicacion, categoria)
-            VALUES (?, ?, ?, ?, ?, ?);
+            INSERT INTO articulos (doc_id, codigo, desc, stock, ubicacion, categoria, alias)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
             """,
             [
                 (
@@ -139,6 +180,7 @@ def reemplazar_todo(items: list[dict[str, Any]], cuando: datetime) -> None:
                     float(i.get("stock") or 0),
                     str(i.get("ubicacion") or ""),
                     str(i.get("categoria") or "GENERAL"),
+                    str(i.get("alias") or "").strip() if i.get("alias") is not None and str(i.get("alias")).strip() != "" else None,
                 )
                 for i in items
             ],
@@ -160,18 +202,46 @@ def upsert_item(
     stock: float,
     ubicacion: str,
     categoria: str = "GENERAL",
+    alias: str | None = None,
 ) -> None:
     with _conectar() as conn:
-        conn.execute(
-            """
-            INSERT INTO articulos (doc_id, codigo, desc, stock, ubicacion, categoria)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(doc_id) DO UPDATE SET
-                codigo = excluded.codigo,
-                desc = excluded.desc,
-                stock = excluded.stock,
-                ubicacion = excluded.ubicacion,
-                categoria = excluded.categoria;
-            """,
-            (doc_id, codigo, desc, float(stock), ubicacion, categoria),
-        )
+        # Ensure alias column exists idempotently
+        try:
+            conn.execute("SELECT alias FROM articulos LIMIT 1")
+        except Exception as e:
+            if "no such column" in str(e).lower():
+                try:
+                    conn.execute("ALTER TABLE articulos ADD COLUMN alias TEXT DEFAULT NULL")
+                except Exception:
+                    pass
+        if alias is None:
+            # Preserve existing alias: do not overwrite alias column on conflict
+            conn.execute(
+                """
+                INSERT INTO articulos (doc_id, codigo, desc, stock, ubicacion, categoria)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(doc_id) DO UPDATE SET
+                    codigo = excluded.codigo,
+                    desc = excluded.desc,
+                    stock = excluded.stock,
+                    ubicacion = excluded.ubicacion,
+                    categoria = excluded.categoria;
+                """,
+                (doc_id, codigo, desc, float(stock), ubicacion, categoria),
+            )
+            # Ensure new rows get alias NULL (already default) - no action needed
+        else:
+            conn.execute(
+                """
+                INSERT INTO articulos (doc_id, codigo, desc, stock, ubicacion, categoria, alias)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(doc_id) DO UPDATE SET
+                    codigo = excluded.codigo,
+                    desc = excluded.desc,
+                    stock = excluded.stock,
+                    ubicacion = excluded.ubicacion,
+                    categoria = excluded.categoria,
+                    alias = excluded.alias;
+                """,
+                (doc_id, codigo, desc, float(stock), ubicacion, categoria, alias),
+            )

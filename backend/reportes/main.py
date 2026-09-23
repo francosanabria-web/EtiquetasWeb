@@ -21,6 +21,7 @@ from starlette.routing import Route
 
 from config import (
     PORT,
+    REPORTES_DB_ENABLED,
     REPORTES_MAIL_DIARIO_ENABLED,
     REPORTES_MAIL_MENSUAL_ENABLED,
     cors_origins_list,
@@ -97,6 +98,11 @@ async def health(_: Request) -> JSONResponse:
             },
             status_code=503,
         )
+    nota_fuente = (
+        "Fuente: MariaDB salida_historial [REPORTES_DB_ENABLED=1]"
+        if str(s.path_usado).startswith("db:")
+        else "Fuente: master_salidas (solo lectura)."
+    )
     return JSONResponse(
         {
             "estado": "ok",
@@ -105,10 +111,9 @@ async def health(_: Request) -> JSONResponse:
             "path": s.path_usado,
             "filas": int(len(s.df)),
             "ultima_actualizacion": s.timestamp_iso(),
-            "nota": (
-                "Fuente: master_salidas (solo lectura). "
-                "Integración futura con API Salidas / SQL pendiente."
-            ),
+            "db_enabled": bool(REPORTES_DB_ENABLED),
+            "fuente": "db" if str(s.path_usado).startswith("db:") else "excel",
+            "nota": nota_fuente + " Fallback a Excel si DB vacía/error.",
         }
     )
 

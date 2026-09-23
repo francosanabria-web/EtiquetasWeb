@@ -2,8 +2,8 @@
 """Persistencia MariaDB — Salidas (paNol).
 
 Conexion a MariaDB (XAMPP) base `panol`.
-Tablas: salida_historial, salida_movimientos_diario, salida_otif
-Esquema idempotente definido en Server/docs/salidas_migracion_v1.sql
+Tablas: salida_historial, salida_movimientos_diario, salida_otif, salida_atenciones, salida_atencion_motivos
+Esquema idempotente definido en Server/docs/salidas_migracion_v*.sql
 Sigue EXACTAMENTE el patron de backend/personal/db.py y backend/cajas/db.py:
   - Pool via pymysql.connections.Connection
   - get_connection() / _get_pool()
@@ -68,13 +68,24 @@ def get_connection():
 
 
 def init_db() -> None:
-    """Crea las 3 tablas salida_* si no existen (idempotente).
+    """Crea las tablas salida_* si no existen (idempotente).
 
-    DDL identico a Server/docs/salidas_migracion_v1.sql pero ejecutado
+    v1: salida_historial (fuente unica, se mantiene)
+    v2: salida_atenciones (ventanilla)
+    v3: salida_atencion_motivos (catalogo) - OBSOLETO en v4 (se elimina)
+    v4: simplificacion volantazo 2026-09-16:
+        - DROP salida_movimientos_diario (diario se extrae de historial)
+        - DROP salida_otif (OTIF detallado futuro)
+        - DROP salida_atencion_motivos (catalogo motivos ya no usado)
+        - Simplificar salida_atenciones a: fecha, con_retiro, observaciones(500),
+          atendido_en, atendido_por, creado_en, actualizado_en
+        - salida_historial intacta como fuente unica
+
+    DDL identico a Server/docs/salidas_migracion_v*.sql pero ejecutado
     via Python para que el servicio pueda auto-inicializarse.
     Requiere que existan las tablas GENERALES `areas` y `personal`;
     si no existen la FK fallara - en ese caso ejecutar primero la
-    migracion de personal/cajas.
+    migracion de personal/cajas (fallback sin FKs).
     """
     conn = get_connection()
     try:
@@ -121,106 +132,342 @@ def init_db() -> None:
             )
 
             # ---------------------------------------------------------
-            # salida_movimientos_diario - libro diario por fecha
+            # v5: auditable soft-delete/edit para salida_historial
+            # Asegurar columnas anulado/editado y tabla de auditoria
             # ---------------------------------------------------------
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS `salida_movimientos_diario` (
-                  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-                  `fecha` DATE NOT NULL COMMENT 'fecha cierre diario UNIQUE',
-                  `total_movimientos` INT UNSIGNED NOT NULL DEFAULT 0,
-                  `total_cantidad` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
-                  `total_monto` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
-                  `devoluciones` INT UNSIGNED NOT NULL DEFAULT 0,
-                  `estado` ENUM('abierto','cerrado','anulado') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'abierto',
-                  `cerrado_por` VARCHAR(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-                  `cerrado_en` DATETIME DEFAULT NULL,
-                  `observaciones` TEXT COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-                  `creado_en` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  `actualizado_en` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                  PRIMARY KEY (`id`),
-                  UNIQUE KEY `uq_salida_diario_fecha` (`fecha`),
-                  KEY `idx_salida_diario_estado` (`estado`)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Libro diario - cierre por fecha'
-                """
-            )
-
-            # ---------------------------------------------------------
-            # salida_otif - medidor OTIF (On Time In Full)
-            # ---------------------------------------------------------
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS `salida_otif` (
-                  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-                  `salida_id` INT UNSIGNED DEFAULT NULL COMMENT 'FK salida_historial',
-                  `solicitud_id` INT UNSIGNED DEFAULT NULL COMMENT 'FK solicitudes_pedidos',
-                  `codigo` VARCHAR(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-                  `descripcion` TEXT COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-                  `fecha_solicitada` DATE DEFAULT NULL,
-                  `fecha_comprometida` DATE NOT NULL COMMENT 'fecha promesa',
-                  `fecha_entrega_real` DATE DEFAULT NULL COMMENT 'NULL=pendiente',
-                  `cantidad_solicitada` DECIMAL(10,2) NOT NULL,
-                  `cantidad_entregada` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-                  `en_tiempo` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 si entrega <= compromiso',
-                  `completo` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 si entregada >= solicitada',
-                  `otif` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 si en_tiempo AND completo',
-                  `motivo_retraso` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-                  `motivo_faltante` VARCHAR(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-                  `responsable_id` INT UNSIGNED DEFAULT NULL COMMENT 'FK personal',
-                  `area_id` INT UNSIGNED DEFAULT NULL COMMENT 'FK areas',
-                  `periodo` DATE DEFAULT NULL COMMENT 'primer dia mes de fecha_comprometida',
-                  `observaciones` TEXT COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-                  `creado_en` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  `actualizado_en` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                  PRIMARY KEY (`id`),
-                  KEY `idx_salida_otif_periodo` (`periodo`),
-                  KEY `idx_salida_otif_fecha_comprometida` (`fecha_comprometida`),
-                  KEY `idx_salida_otif_fecha_entrega_real` (`fecha_entrega_real`),
-                  KEY `idx_salida_otif_responsable` (`responsable_id`),
-                  KEY `idx_salida_otif_area` (`area_id`),
-                  KEY `idx_salida_otif_otif` (`otif`),
-                  KEY `idx_salida_otif_periodo_otif` (`periodo`, `otif`),
-                  KEY `idx_salida_otif_salida` (`salida_id`),
-                  KEY `idx_salida_otif_solicitud` (`solicitud_id`),
-                  CONSTRAINT `fk_salida_otif_salida` FOREIGN KEY (`salida_id`) REFERENCES `salida_historial` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-                  CONSTRAINT `fk_salida_otif_responsable` FOREIGN KEY (`responsable_id`) REFERENCES `personal` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
-                  CONSTRAINT `fk_salida_otif_area` FOREIGN KEY (`area_id`) REFERENCES `areas` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Medidor OTIF por entrega'
-                """
-            )
-
-            # FK a solicitudes_pedidos es opcional - solo si la tabla existe.
-            # Intentar agregarla si no existe aun (idempotente via try).
+            # Columnas soft-delete (idempotente via information_schema)
+            for _col_name, _col_ddl in (
+                ("anulado", "ALTER TABLE `salida_historial` ADD COLUMN `anulado` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1=anulado (soft delete)'"),
+                ("anulado_por", "ALTER TABLE `salida_historial` ADD COLUMN `anulado_por` VARCHAR(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'usuario que anulo'"),
+                ("anulado_en", "ALTER TABLE `salida_historial` ADD COLUMN `anulado_en` DATETIME DEFAULT NULL COMMENT 'cuando se anulo'"),
+                ("motivo_anulacion", "ALTER TABLE `salida_historial` ADD COLUMN `motivo_anulacion` VARCHAR(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'motivo obligatorio'"),
+                ("editado_en", "ALTER TABLE `salida_historial` ADD COLUMN `editado_en` DATETIME DEFAULT NULL"),
+                ("editado_por", "ALTER TABLE `salida_historial` ADD COLUMN `editado_por` VARCHAR(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL"),
+            ):
+                try:
+                    cur.execute(
+                        """
+                        SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='salida_historial' AND COLUMN_NAME=%s
+                        """,
+                        (_col_name,),
+                    )
+                    _rcol = cur.fetchone()
+                    if _rcol and int(_rcol.get("c", 0)) == 0:
+                        cur.execute(_col_ddl)
+                except Exception:
+                    pass
+            # Indice auxiliar para filtrar anulados si no existe
             try:
                 cur.execute(
                     """
-                    SELECT COUNT(*) AS c FROM information_schema.TABLE_CONSTRAINTS
-                    WHERE CONSTRAINT_SCHEMA = DATABASE()
-                      AND TABLE_NAME = 'salida_otif'
-                      AND CONSTRAINT_NAME = 'fk_salida_otif_solicitud'
+                    SELECT COUNT(*) AS c FROM information_schema.STATISTICS
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='salida_historial' AND INDEX_NAME='idx_salida_historial_anulado'
                     """
                 )
-                row = cur.fetchone()
-                if not row or int(row.get("c", 0)) == 0:
-                    # Verificar que la tabla referenciada exista antes de crear FK
-                    cur.execute(
-                        """
-                        SELECT COUNT(*) AS c FROM information_schema.TABLES
-                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'solicitudes_pedidos'
-                        """
-                    )
-                    row2 = cur.fetchone()
-                    if row2 and int(row2.get("c", 0)) > 0:
+                _ridx = cur.fetchone()
+                if _ridx and int(_ridx.get("c", 0)) == 0:
+                    cur.execute("ALTER TABLE `salida_historial` ADD INDEX `idx_salida_historial_anulado` (`anulado`)")
+            except Exception:
+                pass
+            # Tabla auditoria
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS `salida_historial_auditoria` (
+                  `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                  `historial_id` INT UNSIGNED NOT NULL COMMENT 'FK salida_historial.id',
+                  `accion` ENUM('anular','editar','crear') NOT NULL,
+                  `datos_before` JSON DEFAULT NULL COMMENT 'snapshot before',
+                  `datos_after` JSON DEFAULT NULL COMMENT 'snapshot after',
+                  `realizado_por` VARCHAR(120) DEFAULT NULL,
+                  `realizado_en` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  `motivo` VARCHAR(500) DEFAULT NULL,
+                  KEY `idx_auditoria_historial` (`historial_id`),
+                  KEY `idx_auditoria_accion` (`accion`),
+                  KEY `idx_auditoria_fecha` (`realizado_en`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Auditoria de ediciones/anulaciones salida_historial'
+                """
+            )
+
+            # ---------------------------------------------------------
+            # v4: DROP tablas obsoletas (volantazo 2026-09-16)
+            # Si existen, eliminarlas. Diario/OTIF/motivos ya no se usan.
+            # ---------------------------------------------------------
+            for _tbl in ("salida_movimientos_diario", "salida_otif", "salida_atencion_motivos"):
+                try:
+                    cur.execute(f"DROP TABLE IF EXISTS `{_tbl}`")
+                except Exception:
+                    # Intentar con FOREIGN_KEY_CHECKS=0 si hay FK dependencias
+                    try:
+                        cur.execute("SET FOREIGN_KEY_CHECKS=0")
+                        cur.execute(f"DROP TABLE IF EXISTS `{_tbl}`")
+                        cur.execute("SET FOREIGN_KEY_CHECKS=1")
+                    except Exception:
+                        try:
+                            cur.execute("SET FOREIGN_KEY_CHECKS=1")
+                        except Exception:
+                            pass
+                        pass
+
+            # ---------------------------------------------------------
+            # salida_atenciones - v4 simplificada al minimo
+            # Solo: fecha, con_retiro, observaciones(500), atendido_en, atendido_por, creado_en, actualizado_en
+            # Semantica: con_retiro=true -> retiro FUERA DE SISTEMA, false -> no hubo stock
+            # ---------------------------------------------------------
+            # Crear si no existe con esquema minimo
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS `salida_atenciones` (
+                  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                  `fecha` DATE NOT NULL COMMENT 'Fecha de atencion - obligatorio',
+                  `con_retiro` TINYINT(1) NOT NULL COMMENT '1=retiro FUERA DE SISTEMA, 0=no hubo stock de lo solicitado',
+                  `observaciones` VARCHAR(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Observaciones libres (500) - semantica con_retiro',
+                  `atendido_en` DATETIME DEFAULT NULL COMMENT 'Timestamp completo opcional',
+                  `atendido_por` VARCHAR(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Usuario que atendio - opcional',
+                  `creado_en` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  `actualizado_en` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  PRIMARY KEY (`id`),
+                  KEY `idx_salida_atenciones_fecha` (`fecha`),
+                  KEY `idx_salida_atenciones_con_retiro` (`con_retiro`),
+                  KEY `idx_salida_atenciones_creado_en` (`creado_en`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Atenciones ventanilla simplificada v4 - solo fecha, con_retiro (fuera sistema vs sin stock), observaciones'
+                """
+            )
+
+            # ---------------------------------------------------------
+            # v4 migration: simplificar tabla existente si viene de v2/v3
+            # - Eliminar FKs que bloquean DROP COLUMN
+            # - Eliminar indices dependientes
+            # - DROP columnas obsoletas una por una (si existen)
+            # - Ampliar observaciones a 500
+            # - Asegurar columnas minimas existan
+            # ---------------------------------------------------------
+            try:
+                # Verificar que tabla existe (ya creada arriba)
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM information_schema.TABLES
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'salida_atenciones'
+                    """
+                )
+                row_tbl = cur.fetchone()
+                if row_tbl and int(row_tbl.get("c", 0)) > 0:
+                    # --- FKs ---
+                    for _fk in ("fk_salida_atenciones_persona", "fk_salida_atenciones_area", "fk_salida_atenciones_atendido_por", "fk_salida_atenciones_motivo"):
+                        try:
+                            cur.execute(
+                                """
+                                SELECT COUNT(*) AS c FROM information_schema.TABLE_CONSTRAINTS
+                                WHERE CONSTRAINT_SCHEMA = DATABASE()
+                                  AND TABLE_NAME = 'salida_atenciones'
+                                  AND CONSTRAINT_NAME = %s
+                                """,
+                                (_fk,),
+                            )
+                            rfk = cur.fetchone()
+                            if rfk and int(rfk.get("c", 0)) > 0:
+                                cur.execute(f"ALTER TABLE `salida_atenciones` DROP FOREIGN KEY `{_fk}`")
+                        except Exception:
+                            pass
+                    # --- Indices ---
+                    for _idx in ("idx_salida_atenciones_area", "idx_salida_atenciones_persona", "idx_salida_atenciones_atendido_por", "idx_salida_atenciones_motivo", "idx_salida_atenciones_fecha_con_retiro"):
+                        try:
+                            cur.execute(
+                                """
+                                SELECT COUNT(*) AS c FROM information_schema.STATISTICS
+                                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='salida_atenciones' AND INDEX_NAME=%s
+                                """,
+                                (_idx,),
+                            )
+                            ridx = cur.fetchone()
+                            if ridx and int(ridx.get("c", 0)) > 0:
+                                cur.execute(f"ALTER TABLE `salida_atenciones` DROP INDEX `{_idx}`")
+                        except Exception:
+                            pass
+                    # --- Columnas obsoletas ---
+                    for _col in ("hora", "persona_solicitante", "persona_id", "area_id", "sector_nombre", "motivo_sin_retiro", "cantidad_items_solicitados", "orden_referencia", "atendido_por_id", "creado_por"):
+                        try:
+                            cur.execute(
+                                """
+                                SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+                                WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='salida_atenciones' AND COLUMN_NAME=%s
+                                """,
+                                (_col,),
+                            )
+                            rc = cur.fetchone()
+                            if rc and int(rc.get("c", 0)) > 0:
+                                cur.execute(f"ALTER TABLE `salida_atenciones` DROP COLUMN `{_col}`")
+                        except Exception:
+                            pass
+                    # --- Ampliar observaciones ---
+                    try:
                         cur.execute(
                             """
-                            ALTER TABLE `salida_otif`
-                              ADD CONSTRAINT `fk_salida_otif_solicitud`
-                              FOREIGN KEY (`solicitud_id`) REFERENCES `solicitudes_pedidos` (`id`)
-                              ON DELETE SET NULL ON UPDATE CASCADE
+                            SELECT COLUMN_TYPE, CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS
+                            WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='salida_atenciones' AND COLUMN_NAME='observaciones'
                             """
                         )
+                        robs = cur.fetchone()
+                        if robs:
+                            maxlen = robs.get("CHARACTER_MAXIMUM_LENGTH")
+                            coltype = str(robs.get("COLUMN_TYPE") or "")
+                            # Si no es 500, ampliar
+                            if maxlen is not None and int(maxlen) < 500:
+                                cur.execute(
+                                    """
+                                    ALTER TABLE `salida_atenciones`
+                                    MODIFY `observaciones` VARCHAR(500) COLLATE utf8mb4_unicode_ci NULL
+                                    COMMENT 'Observaciones libres (500) - semantica con_retiro: con_retiro=1 retiro fuera de sistema, 0=sin stock'
+                                    """
+                                )
+                            elif "varchar(140" in coltype.lower() or "varchar(150" in coltype.lower() or "varchar(30" in coltype.lower():
+                                cur.execute(
+                                    """
+                                    ALTER TABLE `salida_atenciones`
+                                    MODIFY `observaciones` VARCHAR(500) COLLATE utf8mb4_unicode_ci NULL
+                                    COMMENT 'Observaciones libres (500) - semantica con_retiro'
+                                    """
+                                )
+                    except Exception:
+                        pass
+                    # --- Asegurar columnas minimas existan ---
+                    # atendido_en
+                    try:
+                        cur.execute(
+                            """
+                            SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+                            WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='salida_atenciones' AND COLUMN_NAME='atendido_en'
+                            """
+                        )
+                        rc = cur.fetchone()
+                        if rc and int(rc.get("c", 0)) == 0:
+                            cur.execute("ALTER TABLE `salida_atenciones` ADD COLUMN `atendido_en` DATETIME DEFAULT NULL COMMENT 'Timestamp completo opcional' AFTER `con_retiro`")
+                    except Exception:
+                        pass
+                    # atendido_por
+                    try:
+                        cur.execute(
+                            """
+                            SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+                            WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='salida_atenciones' AND COLUMN_NAME='atendido_por'
+                            """
+                        )
+                        rc = cur.fetchone()
+                        if rc and int(rc.get("c", 0)) == 0:
+                            cur.execute("ALTER TABLE `salida_atenciones` ADD COLUMN `atendido_por` VARCHAR(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Usuario que atendio - opcional' AFTER `atendido_en`")
+                    except Exception:
+                        pass
+                    # creado_en / actualizado_en ya existen si tabla existia, pero verificar por si es instalacion vieja con otra definicion
+                    for _col_def in [
+                        ("creado_en", "ALTER TABLE `salida_atenciones` ADD COLUMN `creado_en` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"),
+                        ("actualizado_en", "ALTER TABLE `salida_atenciones` ADD COLUMN `actualizado_en` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
+                    ]:
+                        _cn, _sql = _col_def
+                        try:
+                            cur.execute(
+                                "SELECT COUNT(*) AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='salida_atenciones' AND COLUMN_NAME=%s",
+                                (_cn,),
+                            )
+                            rc = cur.fetchone()
+                            if rc and int(rc.get("c", 0)) == 0:
+                                cur.execute(_sql)
+                        except Exception:
+                            pass
+                    # --- Indices minimos ---
+                    for _idx, _sql in (
+                        ("idx_salida_atenciones_fecha", "ALTER TABLE `salida_atenciones` ADD INDEX `idx_salida_atenciones_fecha` (`fecha`)"),
+                        ("idx_salida_atenciones_con_retiro", "ALTER TABLE `salida_atenciones` ADD INDEX `idx_salida_atenciones_con_retiro` (`con_retiro`)"),
+                        ("idx_salida_atenciones_creado_en", "ALTER TABLE `salida_atenciones` ADD INDEX `idx_salida_atenciones_creado_en` (`creado_en`)"),
+                    ):
+                        try:
+                            cur.execute(
+                                "SELECT COUNT(*) AS c FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='salida_atenciones' AND INDEX_NAME=%s",
+                                (_idx,),
+                            )
+                            rc = cur.fetchone()
+                            if rc and int(rc.get("c", 0)) == 0:
+                                cur.execute(_sql)
+                        except Exception:
+                            pass
+                    # --- Observaciones: asegurar que no sea NOT NULL si hay datos legacy ---
+                    # No forzamos; dejar NULL
             except Exception:
-                # Si falla por FK existente o tabla faltante, ignorar - migracion SQL lo cubre
+                pass
+
+            # ---------------------------------------------------------
+            # maestro_stock: ensure alias column + index (bidirectional sync DB <-> Firestore)
+            # Idempotent: checks information_schema before ALTER.
+            # Alias VARCHAR(300) for search (e.g., T10 for tornillo 10mm).
+            # ---------------------------------------------------------
+            try:
+                # Ensure maestro_stock table exists with minimal DDL (covers fresh installs
+                # that did not run the _ensure_tables from routes/maestro_stock).
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS `maestro_stock` (
+                      `codigo` VARCHAR(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+                      `descripcion` TEXT COLLATE utf8mb4_unicode_ci NOT NULL,
+                      `alias` VARCHAR(300) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Alias de busqueda, ej T10 para tornillo 10mm',
+                      `stock` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+                      `stock_minimo` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+                      `ubicacion` VARCHAR(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+                      `precio_unitario` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                      `importancia` ENUM('CRITICO','ALTA FRECUENCIA','BASE') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'BASE',
+                      `categoria` VARCHAR(80) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+                      `activo` TINYINT(1) NOT NULL DEFAULT 1,
+                      `creado_en` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                      `actualizado_en` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                      PRIMARY KEY (`codigo`),
+                      KEY `idx_maestro_stock_ubicacion` (`ubicacion`),
+                      KEY `idx_maestro_stock_importancia` (`importancia`),
+                      KEY `idx_maestro_stock_categoria` (`categoria`),
+                      KEY `idx_maestro_stock_alias` (`alias`)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """
+                )
+                # If table already existed without alias, add column and index
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='maestro_stock' AND COLUMN_NAME='alias'
+                    """
+                )
+                _ralias = cur.fetchone()
+                if _ralias and int(_ralias.get("c", 0)) == 0:
+                    try:
+                        cur.execute(
+                            """
+                            ALTER TABLE `maestro_stock`
+                            ADD COLUMN `alias` VARCHAR(300) COLLATE utf8mb4_unicode_ci DEFAULT NULL
+                            COMMENT 'Alias de busqueda, ej T10 para tornillo 10mm' AFTER `descripcion`
+                            """
+                        )
+                    except Exception:
+                        # Fallback: try without AFTER (some MySQL versions / if column order differs)
+                        try:
+                            cur.execute(
+                                """
+                                ALTER TABLE `maestro_stock`
+                                ADD COLUMN `alias` VARCHAR(300) COLLATE utf8mb4_unicode_ci DEFAULT NULL
+                                COMMENT 'Alias de busqueda, ej T10 para tornillo 10mm'
+                                """
+                            )
+                        except Exception:
+                            pass
+                # Ensure index on alias exists
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM information_schema.STATISTICS
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='maestro_stock' AND INDEX_NAME='idx_maestro_stock_alias'
+                    """
+                )
+                _ridx_alias = cur.fetchone()
+                if _ridx_alias and int(_ridx_alias.get("c", 0)) == 0:
+                    try:
+                        cur.execute("ALTER TABLE `maestro_stock` ADD INDEX `idx_maestro_stock_alias` (`alias`)")
+                    except Exception:
+                        pass
+            except Exception:
                 pass
 
         conn.commit()
