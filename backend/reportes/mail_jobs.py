@@ -92,11 +92,46 @@ def _smtp_creds() -> tuple[str, int, str, str, str]:
     return host, port, user, password, from_addr
 
 
+def _personal_destinatarios() -> list[str]:
+    """Lee mails de Personal (panol.personal) donde activo=1 y email no vacío."""
+    if os.environ.get("REPORTES_MAIL_USAR_PERSONAL", "0").strip().lower() in ("0", "false", "no", "off", ""):
+        return []
+    try:
+        import pymysql
+        from config import REPORTES_DB_HOST, REPORTES_DB_PORT, REPORTES_DB_USER, REPORTES_DB_PASSWORD, REPORTES_DB_NAME
+        conn = pymysql.connect(
+            host=REPORTES_DB_HOST, port=int(REPORTES_DB_PORT),
+            user=REPORTES_DB_USER, password=REPORTES_DB_PASSWORD,
+            database=REPORTES_DB_NAME, charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor
+        )
+        with conn.cursor() as cur:
+            cur.execute("SELECT email FROM personal WHERE activo=1 AND email IS NOT NULL AND email <> ''")
+            rows = cur.fetchall()
+            mails = [str(r["email"]).strip() for r in rows if str(r["email"]).strip() and "@" in str(r["email"])]
+            return mails
+    except Exception as e:
+        log.warning("No se pudieron leer mails de Personal: %s", e)
+        return []
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _destinatarios(override: list[str] | None = None) -> list[str]:
-    dest = [d.strip() for d in (override or REPORTES_MAIL_DESTINATARIOS) if d and d.strip()]
+    if override is not None:
+        dest = [d.strip() for d in override if d and d.strip()]
+        if not dest:
+            raise MailNoConfiguradoError("Sin destinatarios (override vacío).")
+        return list(dict.fromkeys(dest))
+    # Base: env var + Personal si está habilitado
+    dest_env = [d.strip() for d in REPORTES_MAIL_DESTINATARIOS if d and d.strip()]
+    dest_personal = _personal_destinatarios()
+    dest = dest_env + dest_personal
     if not dest:
         raise MailNoConfiguradoError(
-            "Sin destinatarios. Seteá REPORTES_MAIL_DESTINATARIOS o pasá override."
+            "Sin destinatarios. Seteá REPORTES_MAIL_DESTINATARIOS o activá REPORTES_MAIL_USAR_PERSONAL=1 con mails en Personal."
         )
     return list(dict.fromkeys(dest))
 

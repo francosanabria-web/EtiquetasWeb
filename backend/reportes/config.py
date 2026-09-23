@@ -10,6 +10,20 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+def _cargar_env_local() -> None:
+    for p in [Path(__file__).resolve().parent / ".env", Path(__file__).resolve().parent.parent / ".env"]:
+        if p.is_file():
+            for raw in p.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+
+_cargar_env_local()
+
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DATA_DIR = BASE_DIR / "data"
 SAMPLE_FILE = "sample_movimientos.csv"
