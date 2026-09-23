@@ -4,3 +4,4 @@ pandas>=2.2.0
 openpyxl>=3.1.5
 xlsxwriter>=3.2.0
 fpdf2==2.8.3
+pymysql==1.1.1
