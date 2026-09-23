@@ -11,6 +11,7 @@ from typing import Any
 import pandas as pd
 
 from config import SHEET_FUERA, SHEET_INGRESADOS, excel_path
+from db import ACTIVOS_DB_ENABLED, get_connection
 
 
 class RedNoDisponibleError(Exception):
@@ -137,7 +138,71 @@ class ActivosStore:
                 raise RedNoDisponibleError("Unidad de red no disponible")
             raise FileNotFoundError(f"No se encontró la carpeta de datos: {parent}")
 
+    def _cargar_desde_db(self) -> datetime:
+        """Carga desde MariaDB panol.salida_activos (DB unica fuente)."""
+        conn = get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, numero_pedido AS NUMERO_PEDIDO,
+                           numero_oc AS NUMERO_OC,
+                           numero_remito AS NUMERO_REMITO,
+                           sector AS SECTOR,
+                           codigo AS CODIGO,
+                           equipo AS EQUIPO_REPUESTO,
+                           cantidad AS CANTIDAD,
+                           nro_serie AS NRO_SERIE,
+                           fecha_salida AS FECHA_SALIDA,
+                           proveedor AS PROVEEDOR,
+                           fecha_regreso AS FECHA_REGRESO,
+                           estado_al_ingreso AS ESTADO_AL_INGRESO,
+                           observaciones AS OBSERVACIONES,
+                           dias_fuera AS DIAS_FUERA,
+                           estado AS ESTADO
+                    FROM salida_activos
+                    ORDER BY fecha_salida DESC, id DESC
+                    """
+                )
+                rows = cur.fetchall()
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        if not rows:
+            self.df = pd.DataFrame()
+            self.archivo_ok = True
+            self.ultima_actualizacion = datetime.now(timezone.utc)
+            return self.ultima_actualizacion
+
+        df = pd.DataFrame(rows)
+        # Mapear a formato esperado por service.py
+        # Renombrar y normalizar
+        df["_fuera"] = df["ESTADO"].astype(str).str.strip().str.lower() == "fuera_de_planta"
+        # _sheet_row ahora es el id de DB para que write_ops use id real
+        df["_sheet_row"] = pd.to_numeric(df["id"], errors="coerce").fillna(-1).astype(int)
+        # Asegurar DIAS_FUERA numerico
+        df["DIAS_FUERA"] = pd.to_numeric(df["DIAS_FUERA"], errors="coerce").fillna(0).astype(int)
+        # SECTOR ya viene normalizado pero asegurar upper
+        df["SECTOR"] = df["SECTOR"].astype(str).str.strip().str.upper().replace({"NAN": "", "NONE": ""})
+        # FECHA_SALIDA / FECHA_REGRESO se mantienen como date/string, service usa fmt_fecha que maneja ambos
+        self.df = df.reset_index(drop=True)
+        self.archivo_ok = True
+        self.ultima_actualizacion = datetime.now(timezone.utc)
+        return self.ultima_actualizacion
+
     def _cargar(self) -> datetime:
+        # DB es la unica fuente desde 2026-09-23; Excel queda como backup no usado
+        if ACTIVOS_DB_ENABLED:
+            try:
+                return self._cargar_desde_db()
+            except Exception as e:
+                # Si DB falla, no caer a Excel — reportar error para no ocultar regresion
+                raise RedNoDisponibleError(f"No se pudo cargar activos desde DB: {e}")
+
+        # Fallback Excel solo si DB deshabilitada explicitamente
         path = excel_path()
         self._verificar_ruta(path)
         self.archivo_ok = path.is_file()
