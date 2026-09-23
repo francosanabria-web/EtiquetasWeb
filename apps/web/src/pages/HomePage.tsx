@@ -1,5 +1,4 @@
-import { modulosInicio } from "../config/navegacion";
-import { etiquetaRol } from "../auth/demoUsers";
+import { etiquetaRol, modulosInicio } from "../config/navegacion";
 import { useAuth } from "../auth/AuthContext";
 import ModuloCard from "../components/ModuloCard";
 

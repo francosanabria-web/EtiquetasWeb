@@ -54,16 +54,6 @@ export default function LoginPage() {
         <button type="submit" disabled={cargando}>
           {cargando ? "Ingresando…" : "Iniciar sesión"}
         </button>
-
-        <details className="demo-hint">
-          <summary>Cuentas de prueba (solo desarrollo)</summary>
-          <ul>
-            <li><strong>Admin:</strong> admin / 1379</li>
-            <li><strong>Pañol:</strong> panol / 1472</li>
-            <li><strong>Supervisor:</strong> supervisor / supervisor123</li>
-            <li><strong>Jefatura/Gerencia:</strong> jefatura / jefatura123</li>
-          </ul>
-        </details>
       </form>
     </div>
   );

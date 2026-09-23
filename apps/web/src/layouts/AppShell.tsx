@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
-import { etiquetaRol } from "../auth/demoUsers";
+import { etiquetaRol } from "../config/navegacion";
 import { useAuth } from "../auth/AuthContext";
 import SidebarNav from "../components/SidebarNav";
 
