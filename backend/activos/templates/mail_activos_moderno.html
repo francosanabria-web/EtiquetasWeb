@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Activos fuera de planta — Pañol</title>
+<style>
+  body { margin:0; padding:0; background:#f6f8fb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color:#1a202c; }
+  .wrapper { width:100%; background:#f6f8fb; padding:16px 0; }
+  .container { max-width:1200px; width:100%; margin:0 auto; background:#ffffff; border-radius:8px; overflow:hidden; box-shadow:0 2px 16px rgba(0,0,0,0.06); box-sizing:border-box; }
+  .header { background: linear-gradient(135deg, #1a365d 0%, #2b6cb0 100%); color:#fff; padding:28px 24px; }
+  .header h1 { margin:0; font-size:20px; font-weight:700; letter-spacing:-0.02em; }
+  .header p { margin:8px 0 0 0; font-size:13px; opacity:0.9; }
+  .badge { display:inline-block; background:rgba(255,255,255,0.18); border:1px solid rgba(255,255,255,0.25); border-radius:999px; padding:4px 12px; font-size:12px; font-weight:600; margin-top:12px; }
+  .summary { display:flex; gap:16px; padding:20px 24px 0 24px; flex-wrap:wrap; }
+  .card { flex:1; min-width:140px; background:#f7fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; }
+  .card-label { font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:#718096; font-weight:600; }
+  .card-value { font-size:18px; font-weight:700; color:#1a365d; margin-top:4px; }
+  .content { padding:20px 24px; }
+  .table-wrap { overflow-x:visible; margin:12px 0 8px 0; }
+  table { width:100%; border-collapse:collapse; font-size:11px; }
+  th { background:#1a365d; color:#fff; text-align:left; padding:6px 8px; font-weight:600; white-space:nowrap; }
+  td { padding:6px 8px; border:1px solid #e2e8f0; background:#fff; }
+  tr:nth-child(even) td { background:#f7fafc; }
+  .dias { text-align:center; font-weight:700; }
+  .dias-rojo { background:#FFC7CE !important; color:#9C0006; }
+  .dias-amarillo { background:#FFEB9C !important; color:#9C6500; }
+  .dias-verde { background:#C6EFCE !important; color:#006100; }
+  .footer { padding:18px 24px; background:#f7fafc; border-top:1px solid #e2e8f0; font-size:11px; color:#718096; text-align:center; }
+  .cta { display:inline-block; margin-top:14px; background:#2b6cb0; color:#fff; text-decoration:none; padding:10px 18px; border-radius:8px; font-size:13px; font-weight:600; }
+  @media only screen and (max-width: 640px) {
+    .container { margin:0 8px; max-width:100%; }
+    .header, .content, .summary, .footer { padding-left:16px; padding-right:16px; }
+    .summary { flex-direction:column; }
+  }
+</style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="container">
+    <div class="header">
+      <h1>Activos fuera de planta</h1>
+      <p>Equipos y repuestos fuera de planta</p>
+      <div class="badge">{{FECHA_FORMATEADA}} &nbsp;•&nbsp; {{CANTIDAD}} activos</div>
+    </div>
+
+    <div class="summary">
+      <div class="card">
+        <div class="card-label">Fuera de planta</div>
+        <div class="card-value">{{CANTIDAD}}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Días promedio</div>
+        <div class="card-value">{{DIAS_PROMEDIO}}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Críticos &gt;30 días</div>
+        <div class="card-value">{{CRITICOS}}</div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Días fuera</th><th>Equipo</th><th>Cantidad</th><th>Observaciones</th><th>Proveedor</th><th>Sector</th></tr></thead>
+          <tbody>{{FILAS_ACTIVOS}}</tbody>
+        </table>
+      </div>
+
+      <p style="text-align:center; margin:22px 0 0 0;">
+        <a class="cta" href="{{PORTAL_URL}}">Ver detalle completo en portal →</a>
+      </p>
+    </div>
+
+    <div class="footer">
+      Sistema Pañol — Mantenimiento OZLA &nbsp;•&nbsp; {{TIMESTAMP}}
+    </div>
+  </div>
+</div>
+</body>
+</html>
