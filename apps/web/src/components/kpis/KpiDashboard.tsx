@@ -9,6 +9,7 @@ import {
   fetchReposicion,
   fetchStockEnCero,
   fetchStockResumen,
+  fetchActivos,
   fmtFecha,
   mesActual,
   refreshKpis,
@@ -21,11 +22,13 @@ import {
   type ReposicionResumen,
   type StockResumen,
   type ArticuloStock,
+  type ActivosResumen,
 } from "../../api/kpisClient";
 import ConsumoSection from "./ConsumoSection";
 import KpiResumenCards from "./KpiResumenCards";
 import ReposicionSection from "./ReposicionSection";
 import StockSection from "./StockSection";
+import ActivosSection from "./ActivosSection";
 import "../../styles/kpis.css";
 
 type SectionErr = Record<string, string | undefined>;
@@ -61,6 +64,10 @@ export default function KpiDashboard() {
 
   const [reposicion, setReposicion] = useState<ReposicionResumen | null>(null);
   const [reposErr, setReposErr] = useState<string | null>(null);
+
+  const [activos, setActivos] = useState<ActivosResumen | null>(null);
+  const [activosErr, setActivosErr] = useState<string | null>(null);
+  const [activosLoading, setActivosLoading] = useState(true);
 
   const pickTimestamp = useCallback((...isos: (string | undefined)[]) => {
     const valid = isos.filter(Boolean) as string[];
@@ -128,17 +135,35 @@ export default function KpiDashboard() {
     setLoadingRepos(false);
   }, [pickTimestamp]);
 
+  const loadActivos = useCallback(async () => {
+    setActivosLoading(true);
+    setActivosErr(null);
+    try {
+      const r = await loadSafe(fetchActivos);
+      if (r.error) setActivosErr(r.error);
+      else {
+        setActivos(r.data);
+        pickTimestamp(r.data?.ultima_actualizacion);
+      }
+    } catch (e) {
+      setActivosErr(e instanceof Error ? e.message : "Error al cargar activos");
+    } finally {
+      setActivosLoading(false);
+    }
+  }, [pickTimestamp]);
+
   const loadAll = useCallback(async () => {
-    await Promise.all([loadStock(), loadConsumo(mes), loadRepos()]);
-  }, [loadStock, loadConsumo, loadRepos, mes]);
+    await Promise.all([loadStock(), loadConsumo(mes), loadRepos(), loadActivos()]);
+  }, [loadStock, loadConsumo, loadRepos, loadActivos, mes]);
 
   useEffect(() => {
     void loadStock();
     void loadRepos();
+    void loadActivos();
     loadSafe(fetchKpisHealth).then((r) => {
       if (r.data) setHealth(r.data);
     });
-  }, [loadStock, loadRepos]);
+  }, [loadStock, loadRepos, loadActivos]);
 
   useEffect(() => {
     void loadConsumo(mes);
@@ -198,6 +223,12 @@ export default function KpiDashboard() {
         loading={loadingStock && loadingRepos && loadingConsumo}
       />
 
+      <ActivosSection
+        data={activos}
+        loading={activosLoading}
+        error={activosErr}
+        onRetry={loadActivos}
+      />
       <StockSection resumen={stock} enCero={enCero} loading={loadingStock} error={stockErr} />
       <ConsumoSection
         mensual={mensual}

@@ -29,7 +29,7 @@ export default function ActivosFueraPage() {
   }, [load]);
 
   return (
-    <div className="page-content">
+    <div className="page-content act-page-wide">
       <header className="page-header">
         <h1>Activos fuera de planta</h1>
         <p className="sub">Seguimiento de reparaciones, remitos y estado por sector.</p>
