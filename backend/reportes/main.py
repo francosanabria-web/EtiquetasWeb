@@ -25,7 +25,6 @@ from config import (
     REPORTES_MAIL_DIARIO_ENABLED,
     REPORTES_MAIL_MENSUAL_ENABLED,
     cors_origins_list,
-    movimientos_path,
 )
 from mail_jobs import (
     MailNoConfiguradoError,
@@ -74,7 +73,6 @@ def _qp(request: Request) -> dict[str, str]:
 
 async def health(_: Request) -> JSONResponse:
     s = ReportesStore.get()
-    # Check perezoso también en /health para que el monitor vea datos frescos sin esperar otro endpoint
     try:
         s._ensure_fresh()
     except Exception:
@@ -85,7 +83,7 @@ async def health(_: Request) -> JSONResponse:
                 "estado": "error",
                 "detail": s._error_carga,
                 "archivo": s.archivo_ok,
-                "path": s.path_usado or str(movimientos_path()),
+                "path": s.path_usado or "db:panol.salida_historial",
             },
             status_code=503,
         )
@@ -94,15 +92,10 @@ async def health(_: Request) -> JSONResponse:
             {
                 "estado": "cargando",
                 "archivo": s.archivo_ok,
-                "path": str(movimientos_path()),
+                "path": "db:panol.salida_historial",
             },
             status_code=503,
         )
-    nota_fuente = (
-        "Fuente: MariaDB salida_historial [REPORTES_DB_ENABLED=1]"
-        if str(s.path_usado).startswith("db:")
-        else "Fuente: master_salidas (solo lectura)."
-    )
     return JSONResponse(
         {
             "estado": "ok",
@@ -112,8 +105,8 @@ async def health(_: Request) -> JSONResponse:
             "filas": int(len(s.df)),
             "ultima_actualizacion": s.timestamp_iso(),
             "db_enabled": bool(REPORTES_DB_ENABLED),
-            "fuente": "db" if str(s.path_usado).startswith("db:") else "excel",
-            "nota": nota_fuente + " Fallback a Excel si DB vacía/error.",
+            "fuente": "db",
+            "nota": "Fuente exclusiva: MariaDB salida_historial [DB-ONLY, sin fallback Excel].",
         }
     )
 
@@ -230,7 +223,7 @@ async def post_mail_mensual(request: Request) -> JSONResponse:
 def _carga_inicial() -> None:
     try:
         ReportesStore.get().refresh()
-        log.info("Reportes cargados desde %s", movimientos_path())
+        log.info("Reportes cargados desde DB (salida_historial) [DB-ONLY]")
     except Exception as e:
         ReportesStore.get().registrar_error_carga(str(e))
         log.warning("Carga inicial fallida: %s", e)

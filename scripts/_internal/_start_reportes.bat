@@ -7,20 +7,13 @@ if not exist ".venv\Scripts\python.exe" (
 )
 ".venv\Scripts\python.exe" -m pip install -q -r requirements.txt
 
-REM Reportes en modo DB: lee salida_historial si está disponible, fallback Excel
+REM Reportes en modo DB exclusivo: lee salida_historial de MariaDB, sin fallback Excel
 if not defined REPORTES_DB_ENABLED set REPORTES_DB_ENABLED=1
-REM No forzar data_prueba: config.py resuelve a master_salidas de producción
-REM (mismo path que KPIs) salvo override con REPORTES_MOVIMIENTOS_FILE /
-REM REPORTES_DATA_PATH / KPIS_DATA_PATH / SALIDAS_DATA_PATH.
+REM Config.py resuelve DSN desde SALIDAS_DB_* / DB_* env vars (misma DB que salidas)
 echo.
-echo Reportes (movimientos) en http://localhost:8017 [REPORTES_DB_ENABLED=%REPORTES_DB_ENABLED%]
-if defined REPORTES_MOVIMIENTOS_FILE (
-  echo Override REPORTES_MOVIMIENTOS_FILE=%REPORTES_MOVIMIENTOS_FILE%
-) else (
-  echo Fuente: resuelta por config.py ^(prod por defecto^)
-)
+echo Reportes (movimientos) en http://localhost:8017 [DB-ONLY: salida_historial]
 echo.
-".venv\Scripts\python.exe" -c "from config import movimientos_path; print('Movimientos:', movimientos_path())"
+".venv\Scripts\python.exe" -c "from config import COLUMNAS, REPORTES_DB_ENABLED; print('DB habilitado:', REPORTES_DB_ENABLED, '| columnas:', len(COLUMNAS))"
 echo.
 ".venv\Scripts\python.exe" -m uvicorn main:app --host 0.0.0.0 --port 8017
 pause

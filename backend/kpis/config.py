@@ -27,6 +27,21 @@ CORS_ORIGINS = os.environ.get(
     "http://localhost:5173,http://localhost:5180,http://127.0.0.1:5173,http://127.0.0.1:5180",
 )
 
+# ── MariaDB DSN (misma configuración que backend/salidas/config.py) ──
+DB_HOST = os.environ.get("SALIDAS_DB_HOST", os.environ.get("DB_HOST", "127.0.0.1"))
+DB_PORT = int(os.environ.get("SALIDAS_DB_PORT", os.environ.get("DB_PORT", "3306")))
+DB_USER = os.environ.get("SALIDAS_DB_USER", os.environ.get("DB_USER", "root"))
+DB_PASSWORD = os.environ.get("SALIDAS_DB_PASSWORD", os.environ.get("DB_PASSWORD", ""))
+DB_NAME = os.environ.get("SALIDAS_DB_NAME", os.environ.get("DB_NAME", "panol"))
+DB_DSN = os.environ.get(
+    "SALIDAS_DB_DSN",
+    os.environ.get("DB_DSN", f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"),
+)
+
+KPIS_DB_ENABLED = os.environ.get("KPIS_DB_ENABLED", os.environ.get("SALIDAS_DB_ENABLED", "1")).strip().lower() not in (
+    "0", "false", "no", "off", ""
+)
+
 
 def base_path() -> Path:
     raw = os.environ.get("KPIS_DATA_PATH", "").strip()
