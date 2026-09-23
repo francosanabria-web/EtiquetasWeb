@@ -33,7 +33,7 @@ export default function LoginPage() {
             autoComplete="username"
             value={identificador}
             onChange={(e) => setIdentificador(e.target.value)}
-            placeholder="admin (o admin@panol.local)"
+            placeholder="Usuario"
             required
           />
         </label>
