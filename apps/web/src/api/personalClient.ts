@@ -50,6 +50,7 @@ export type Personal = {
   area_id: number | null;
   tipo: PersonalTipo;
   activo: boolean;
+  prefs?: Record<string, boolean>;
 };
 
 export type PersonalListResponse = {
@@ -128,4 +129,24 @@ export async function deletePersonal(token: string, id: number): Promise<void> {
 export async function getAreas(token: string): Promise<Area[]> {
   const data = await fetchJson<{ areas: Area[] }>("/api/areas", {}, token);
   return data.areas ?? [];
+}
+
+export type MailPrefs = Record<string, boolean>;
+
+export async function getPersonalMailPrefs(token: string, id: number): Promise<MailPrefs> {
+  const data = await fetchJson<MailPrefs>(`/api/personal/${id}/mail-prefs`, {}, token);
+  return data;
+}
+
+export async function setPersonalMailPrefs(token: string, id: number, prefs: MailPrefs): Promise<MailPrefs> {
+  const data = await fetchJson<MailPrefs>(`/api/personal/${id}/mail-prefs`, {
+    method: "PUT",
+    body: JSON.stringify(prefs),
+  }, token);
+  return data;
+}
+
+export async function listAllPersonalMailPrefs(token: string): Promise<{ items: Array<{ id: number; nombre: string; prefs: Record<string, boolean> }>; total: number }> {
+  const data = await fetchJson<{ items: Array<{ id: number; nombre: string; prefs: Record<string, boolean> }>; total: number }>("/api/personal/mail-prefs", {}, token);
+  return data;
 }

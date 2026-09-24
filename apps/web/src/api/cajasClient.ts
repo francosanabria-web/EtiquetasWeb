@@ -253,3 +253,380 @@ export async function updateInventarioEstado(token: string, id: number, estado: 
 export async function deleteInventario(token: string, id: number): Promise<void> {
   await fetchJson<{ ok: boolean }>(`/api/cajas/inventarios/${id}`, { method: "DELETE" }, token);
 }
+
+// ---------------------------------------------------------------------------
+// Caja Ideal (versionado) — Slice 1 & 2
+// ---------------------------------------------------------------------------
+
+export type IdealHerramienta = {
+  id: number;
+  herramienta_id: number;
+  codigo: string;
+  descripcion: string | null;
+  cantidad_minima: number;
+  articulo_codigo: string | null;
+};
+
+export type Ideal = {
+  id: number | null;
+  nombre: string | null;
+  descripcion: string | null;
+  activa: boolean;
+  vigente_desde: string | null;
+  creado_por: number | null;
+  creado_en: string | null;
+  herramientas: IdealHerramienta[];
+  mensaje?: string | null;
+  hint?: string | null;
+};
+
+export type IdealVersionesItem = {
+  id: number;
+  nombre: string;
+  descripcion: string | null;
+  activa: boolean;
+  vigente_desde: string | null;
+  creado_por: number | null;
+  creado_en: string | null;
+};
+
+export type IdealVersionesResponse = {
+  items: IdealVersionesItem[];
+  total: number;
+};
+
+export type TecnicoCard = {
+  tecnico_id: number;
+  tecnico_nombre: string;
+  tecnico_tipo: string;
+  caja_id: number | null;
+  caja_codigo: string | null;
+  ultimo_periodo: string | null;
+  ultimo_estado: "borrador" | "cerrado" | null;
+  ideal_count: number;
+  presente_count: number;
+  faltantes_pct: number | null;
+  completitud_pct: number;
+  limpieza_score: number;
+};
+
+export type TecnicoCardsResponse = {
+  items: TecnicoCard[];
+  total: number;
+};
+
+export type TecnicoInventarioDetalle = {
+  id: number;
+  herramienta_id: number;
+  herramienta_codigo: string;
+  nro_item: number;
+  cantidad: number;
+  estado: "bueno" | "regular" | "malo";
+  presente: boolean;
+  observaciones: string | null;
+};
+
+export type TecnicoInventario = {
+  id: number;
+  caja_id: number;
+  caja_codigo: string | null;
+  fecha: string | null;
+  periodo: string;
+  tecnico_id: number;
+  tecnico_nombre: string | null;
+  supervisor_id: number;
+  supervisor_nombre: string | null;
+  area: string | null;
+  estado: "borrador" | "cerrado";
+  obs: string | null;
+  obs_generales: string | null;
+  detalle: TecnicoInventarioDetalle[];
+};
+
+export type TecnicoHistorialResponse = {
+  items: TecnicoInventario[];
+  total: number;
+};
+
+export type KpisResumenTecnico = {
+  tecnico_id: number;
+  tecnico_nombre: string;
+  tecnico_tipo: string;
+  caja_codigo: string | null;
+  ultimo_periodo: string | null;
+  ultimo_estado: string | null;
+  ideal_count: number;
+  presente_count: number;
+  faltantes_pct: number | null;
+  completitud_pct: number | null;
+  limpieza_score: number;
+};
+
+export type KpisResumenGlobal = {
+  ideal_count: number;
+  total_tecnicos: number;
+  tecnicos_con_inventario: number;
+  tecnicos_sin_inventario: number;
+  promedio_faltantes_pct: number;
+  promedio_completitud_pct: number;
+  avg_faltantes_pct: number;
+  avg_completitud_pct: number;
+  avg_limpieza_score: number;
+  distribucion_faltantes?: Record<string, number>;
+  distribucion?: Record<string, number>;
+};
+
+export type KpisResumen = {
+  ideal_count: number;
+  total_tecnicos: number;
+  tecnicos_con_inventario: number;
+  tecnicos_sin_inventario: number;
+  avg_faltantes_pct: number;
+  avg_completitud_pct: number;
+  avg_limpieza_score: number;
+  promedio_faltantes_pct: number;
+  promedio_completitud_pct: number;
+  distribucion_faltantes: Record<string, number>;
+  distribucion: Record<string, number>;
+  tecnicos: KpisResumenTecnico[];
+  items: KpisResumenTecnico[];
+  total: number;
+  global: KpisResumenGlobal;
+  mensaje: string | null;
+  hint: string | null;
+};
+
+export type KpisPorTecnicoHistorialEntry = {
+  inventario_id: number;
+  periodo: string | null;
+  estado: string | null;
+  caja_id: number | null;
+  caja_codigo: string | null;
+  presente_count: number;
+  total_detalle: number;
+  faltantes_pct: number | null;
+  completitud_pct: number | null;
+  limpieza_score: number;
+  mal_count: number;
+  malos: number;
+};
+
+export type KpisPorTecnico = {
+  tecnico_id: number;
+  tecnico_nombre: string;
+  tecnico_tipo: string;
+  ideal_count: number;
+  presente_count: number;
+  faltantes_pct: number | null;
+  completitud_pct: number | null;
+  limpieza_score: number;
+  ultimo_periodo: string | null;
+  ultimo_estado: string | null;
+  historial: KpisPorTecnicoHistorialEntry[];
+  historial_faltantes: KpisPorTecnicoHistorialEntry[];
+  total_inventarios: number;
+  total: number;
+  mensaje: string | null;
+  hint: string | null;
+};
+
+export type PutIdealPayload = {
+  nombre: string;
+  descripcion?: string | null;
+  detalle: Array<{
+    herramienta_codigo: string;
+    cantidad_minima: number;
+    articulo_codigo?: string | null;
+  }>;
+};
+
+export async function getIdeal(token: string): Promise<Ideal> {
+  const data = await fetchJson<Ideal>("/api/cajas/ideal", {}, token);
+  // Normalize: ensure herramientas array present
+  if (!Array.isArray(data.herramientas)) {
+    return { ...data, herramientas: [] };
+  }
+  return data;
+}
+
+export async function putIdeal(token: string, payload: PutIdealPayload): Promise<Ideal> {
+  const data = await fetchJson<Ideal>("/api/cajas/ideal", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  }, token);
+  if (!Array.isArray(data.herramientas)) {
+    return { ...data, herramientas: [] };
+  }
+  return data;
+}
+
+export async function getIdealVersiones(
+  token: string,
+  params?: { limit?: number; offset?: number },
+): Promise<IdealVersionesResponse> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit != null) searchParams.set("limit", String(params.limit));
+  if (params?.offset != null) searchParams.set("offset", String(params.offset));
+  const qs = searchParams.toString();
+  const path = qs ? `/api/cajas/ideal/versiones?${qs}` : "/api/cajas/ideal/versiones";
+  const data = await fetchJson<{ items: IdealVersionesItem[]; total: number }>(path, {}, token);
+  return { items: data.items ?? [], total: data.total ?? 0 };
+}
+
+export async function getTecnicosCards(
+  token: string,
+  params?: { limit?: number; offset?: number; q?: string },
+): Promise<TecnicoCardsResponse> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit != null) searchParams.set("limit", String(params.limit));
+  if (params?.offset != null) searchParams.set("offset", String(params.offset));
+  if (params?.q) searchParams.set("q", params.q);
+  const qs = searchParams.toString();
+  const path = qs ? `/api/cajas/tecnicos-cards?${qs}` : "/api/cajas/tecnicos-cards";
+  const data = await fetchJson<{ items: TecnicoCard[]; total: number }>(path, {}, token);
+  return { items: data.items ?? [], total: data.total ?? 0 };
+}
+
+export async function getTecnicoHistorial(
+  token: string,
+  tecnicoId: number,
+  params?: { limit?: number; offset?: number; estado?: string },
+): Promise<TecnicoHistorialResponse> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit != null) searchParams.set("limit", String(params.limit));
+  if (params?.offset != null) searchParams.set("offset", String(params.offset));
+  if (params?.estado) searchParams.set("estado", params.estado);
+  const qs = searchParams.toString();
+  const base = `/api/cajas/tecnicos/${tecnicoId}/inventarios`;
+  const path = qs ? `${base}?${qs}` : base;
+  const data = await fetchJson<{ items: TecnicoInventario[]; total: number }>(path, {}, token);
+  // Backend may return array directly in some handlers; normalize
+  if (Array.isArray(data as unknown as TecnicoInventario[])) {
+    const arr = data as unknown as TecnicoInventario[];
+    return { items: arr, total: arr.length };
+  }
+  return { items: (data as { items: TecnicoInventario[] }).items ?? [], total: (data as { total: number }).total ?? 0 };
+}
+
+export async function getKpisResumen(
+  token: string,
+  params?: { q?: string; limit?: number; offset?: number },
+): Promise<KpisResumen> {
+  const searchParams = new URLSearchParams();
+  if (params?.q) searchParams.set("q", params.q);
+  if (params?.limit != null) searchParams.set("limit", String(params.limit));
+  if (params?.offset != null) searchParams.set("offset", String(params.offset));
+  const qs = searchParams.toString();
+  const path = qs ? `/api/cajas/kpis/resumen?${qs}` : "/api/cajas/kpis/resumen";
+  const data = await fetchJson<KpisResumen>(path, {}, token);
+  return data;
+}
+
+export async function getKpisPorTecnico(token: string, tecnicoId: number): Promise<KpisPorTecnico> {
+  const data = await fetchJson<KpisPorTecnico>(`/api/cajas/kpis/tecnico/${tecnicoId}`, {}, token);
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Limpieza & Asignaciones (Fase 2) — client for /api/cajas/limpieza & /asignaciones
+
+export type LimpiezaEvento = {
+  id: number;
+  caja_id: number;
+  caja_codigo: string | null;
+  tecnico_id: number;
+  tecnico_nombre: string | null;
+  fecha: string | null;
+  estado: "pendiente" | "realizada" | "vencida";
+  responsable_id: number | null;
+  observaciones: string | null;
+  creado_en: string | null;
+};
+
+export type LimpiezaListResponse = {
+  items: LimpiezaEvento[];
+  total: number;
+};
+
+export type Asignacion = {
+  id: number;
+  caja_id: number;
+  caja_codigo: string | null;
+  tecnico_id: number;
+  tecnico_nombre: string | null;
+  desde: string | null;
+  hasta: string | null;
+  activa: boolean;
+  creado_en: string | null;
+};
+
+export type AsignacionListResponse = {
+  items: Asignacion[];
+  total: number;
+};
+
+export async function getLimpieza(
+  token: string,
+  params?: { caja_id?: number; tecnico_id?: number; estado?: string; limit?: number; offset?: number },
+): Promise<LimpiezaListResponse> {
+  const sp = new URLSearchParams();
+  if (params?.caja_id != null) sp.set("caja_id", String(params.caja_id));
+  if (params?.tecnico_id != null) sp.set("tecnico_id", String(params.tecnico_id));
+  if (params?.estado) sp.set("estado", params.estado);
+  if (params?.limit != null) sp.set("limit", String(params.limit));
+  if (params?.offset != null) sp.set("offset", String(params.offset));
+  const qs = sp.toString();
+  const path = qs ? `/api/cajas/limpieza?${qs}` : "/api/cajas/limpieza";
+  const data = await fetchJson<{ items: LimpiezaEvento[]; total: number }>(path, {}, token);
+  return { items: data.items ?? [], total: data.total ?? 0 };
+}
+
+export async function createLimpieza(
+  token: string,
+  payload: { caja_id: number; tecnico_id: number; estado?: string; responsable_id?: number | null; observaciones?: string | null; fecha?: string | null },
+): Promise<LimpiezaEvento> {
+  const data = await fetchJson<LimpiezaEvento>("/api/cajas/limpieza", { method: "POST", body: JSON.stringify(payload) }, token);
+  return data;
+}
+
+export async function updateLimpiezaEstado(
+  token: string,
+  id: number,
+  payload: { estado?: string; observaciones?: string | null },
+): Promise<LimpiezaEvento> {
+  const data = await fetchJson<LimpiezaEvento>(`/api/cajas/limpieza/${id}/estado`, { method: "PATCH", body: JSON.stringify(payload) }, token);
+  return data;
+}
+
+export async function deleteLimpieza(token: string, id: number): Promise<void> {
+  await fetchJson<{ ok: boolean }>(`/api/cajas/limpieza/${id}`, { method: "DELETE" }, token);
+}
+
+export async function getAsignaciones(
+  token: string,
+  params?: { caja_id?: number; tecnico_id?: number; activa?: boolean | number | string; limit?: number; offset?: number },
+): Promise<AsignacionListResponse> {
+  const sp = new URLSearchParams();
+  if (params?.caja_id != null) sp.set("caja_id", String(params.caja_id));
+  if (params?.tecnico_id != null) sp.set("tecnico_id", String(params.tecnico_id));
+  if (params?.activa !== undefined && params?.activa !== null && String(params.activa).trim() !== "") sp.set("activa", String(params.activa));
+  if (params?.limit != null) sp.set("limit", String(params.limit));
+  if (params?.offset != null) sp.set("offset", String(params.offset));
+  const qs = sp.toString();
+  const path = qs ? `/api/cajas/asignaciones?${qs}` : "/api/cajas/asignaciones";
+  const data = await fetchJson<{ items: Asignacion[]; total: number }>(path, {}, token);
+  return { items: data.items ?? [], total: data.total ?? 0 };
+}
+
+export async function createAsignacion(
+  token: string,
+  payload: { caja_id: number; tecnico_id: number; desde: string; hasta?: string | null },
+): Promise<Asignacion> {
+  const data = await fetchJson<Asignacion>("/api/cajas/asignaciones", { method: "POST", body: JSON.stringify(payload) }, token);
+  return data;
+}
+
+export async function cerrarAsignacion(token: string, id: number): Promise<Asignacion> {
+  const data = await fetchJson<Asignacion>(`/api/cajas/asignaciones/${id}/cerrar`, { method: "PATCH", body: JSON.stringify({}) }, token);
+  return data;
+}

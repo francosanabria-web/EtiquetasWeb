@@ -32,7 +32,7 @@ type Props = {
 
 function matchQuery(a: ActivoItem, q: string): boolean {
   if (!q) return true;
-  const hay = [a.equipo, a.codigo, a.remito, a.n_pedido, a.n_oc, a.proveedor, a.sector, a.nro_serie]
+  const hay = [a.equipo, a.observaciones, a.proveedor, a.sector, String(a.cantidad ?? ""), String(a.dias_fuera)]
     .join(" ")
     .toLowerCase();
   return hay.includes(q);
@@ -80,16 +80,12 @@ function Tabla({
                   />
                 </th>
               ) : null}
+              <th>Días fuera</th>
               <th>Equipo / repuesto</th>
-              <th>Código</th>
-              <th>Remito</th>
-              <th>Pedido</th>
-              <th>OC</th>
-              <th>Sector</th>
-              <th>Días</th>
+              <th>Cantidad</th>
+              <th>Observaciones</th>
               <th>Proveedor</th>
-              <th>{vista === "ingresados" ? "Regreso" : "Salida"}</th>
-              {vista === "ingresados" ? <th>Estado ingreso</th> : null}
+              <th>Sector</th>
             </tr>
           </thead>
           <tbody>
@@ -97,7 +93,7 @@ function Tabla({
               const checked = a.id ? seleccion.has(a.id) : false;
               return (
                 <tr
-                  key={`${a.id || "x"}-${a.codigo}-${a.remito}-${i}`}
+                  key={`${a.id || "x"}-${a.equipo}-${i}`}
                   className={`${claseFilaDias(a.dias_fuera)}${checked ? " act-row-selected" : ""}`}
                 >
                   {puedeSeleccionar ? (
@@ -107,30 +103,26 @@ function Tabla({
                         checked={checked}
                         disabled={!a.id}
                         onChange={() => a.id && onToggle(a.id)}
-                        aria-label={`Seleccionar ${a.equipo || a.codigo}`}
+                        aria-label={`Seleccionar ${a.equipo || a.dias_fuera}`}
                       />
                     </td>
                   ) : null}
+                  <td>
+                    <span className={claseBadgeDias(a.dias_fuera)}>{a.dias_fuera}</span>
+                  </td>
                   <td className="act-td-desc" title={a.equipo}>
                     {a.equipo || "—"}
                   </td>
-                  <td>{a.codigo || "—"}</td>
-                  <td className="act-td-doc">{a.remito || "—"}</td>
-                  <td className="act-td-doc">{a.n_pedido || "—"}</td>
-                  <td className="act-td-doc">{a.n_oc || "—"}</td>
-                  <td>{etiquetaSector(a.sector) || "—"}</td>
-                  <td>
-                    <span className={claseBadgeDias(a.dias_fuera)}>{a.dias_fuera}</span>
+                  <td className="act-td-doc" style={{ textAlign: "center" }}>
+                    {a.cantidad ?? 1}
+                  </td>
+                  <td className="act-td-desc" title={a.observaciones} style={{ maxWidth: 220 }}>
+                    {a.observaciones || "—"}
                   </td>
                   <td className="act-td-prov" title={a.proveedor}>
                     {a.proveedor || "—"}
                   </td>
-                  <td className="act-td-doc">
-                    {vista === "ingresados" ? a.fecha_regreso || "—" : a.fecha_salida || "—"}
-                  </td>
-                  {vista === "ingresados" ? (
-                    <td>{(a.estado_al_ingreso || a.estado || "").replace(/_/g, " ") || "—"}</td>
-                  ) : null}
+                  <td>{etiquetaSector(a.sector) || "—"}</td>
                 </tr>
               );
             })}
@@ -143,7 +135,7 @@ function Tabla({
           const checked = a.id ? seleccion.has(a.id) : false;
           return (
             <li
-              key={`m-${a.id || "x"}-${a.codigo}-${i}`}
+              key={`m-${a.id || "x"}-${a.equipo}-${i}`}
               className={`act-card-row ${claseFilaDias(a.dias_fuera)}${checked ? " act-row-selected" : ""}`}
             >
               <div className="act-card-row-top">
@@ -154,26 +146,22 @@ function Tabla({
                       checked={checked}
                       disabled={!a.id}
                       onChange={() => a.id && onToggle(a.id)}
-                      aria-label={`Seleccionar ${a.equipo || a.codigo}`}
+                      aria-label={`Seleccionar ${a.equipo || a.dias_fuera}`}
                     />
                   </label>
                 ) : null}
                 <div className="act-card-row-main">
-                  <strong className="act-card-row-title">{a.equipo || a.codigo || "Sin nombre"}</strong>
+                  <strong className="act-card-row-title">{a.equipo || "Sin nombre"}</strong>
                   <span className={claseBadgeDias(a.dias_fuera)}>{a.dias_fuera} días</span>
                 </div>
               </div>
               <div className="act-card-row-meta">
-                <span>{a.codigo || "—"}</span>
+                <span>Cant. {a.cantidad ?? 1}</span>
                 <span>{etiquetaSector(a.sector) || "—"}</span>
                 <span>{a.proveedor || "Sin proveedor"}</span>
               </div>
               <div className="act-card-row-docs">
-                <span>Remito {a.remito || "—"}</span>
-                <span>
-                  {vista === "ingresados" ? "Regreso" : "Salida"}{" "}
-                  {vista === "ingresados" ? a.fecha_regreso || "—" : a.fecha_salida || "—"}
-                </span>
+                <span>{a.observaciones || "Sin observaciones"}</span>
               </div>
             </li>
           );
@@ -483,7 +471,7 @@ export default function ActivosPanel({
         <input
           className="act-search"
           type="search"
-          placeholder="Buscar equipo, código, remito…"
+          placeholder="Buscar equipo, observaciones, proveedor…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           aria-label="Buscar"

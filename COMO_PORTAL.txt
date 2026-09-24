@@ -1,0 +1,93 @@
+==================================================================
+  PORTAL PANOL  ::  GUIA RAPIDA (supervisor, sin impresion)
+==================================================================
+  Ultima actualizacion: 01/08/2026
+  Esta PC es el "servidor" del portal web (KPIs, Minuta, Solicitudes,
+  Usuarios, Activos, Email, shell). Impresion de etiquetas es OTRA red
+  (ver COMO_IMPRIMIR.txt) y no se mezcla con estos comandos.
+------------------------------------------------------------------
+
+DATOS IMPORTANTES
+------------------------------------------------------------------
+  IP de esta PC .................. 10.1.102.8
+  Puerto del PORTAL .............. 5180
+  URL esta PC .................... http://localhost:5180
+  URL otra PC .................... http://10.1.102.8:5180
+
+  Backends (no abrir a mano si el supervisor esta activo):
+    KPIs ............ :8001
+    Minuta .......... :8013
+    Solicitudes ..... :8014
+    Usuarios ........ :8015
+    Activos ......... :8016
+    Email ........... :8020
+
+  Tarea Windows ................. PortalPanol
+  (paralela a RedImpresionPanol; NO la borra ni la toca)
+
+
+==================================================================
+  CONSULTAR ESTADO  (el comando mas usado)
+==================================================================
+  Abrir PowerShell y pegar:
+
+    powershell -ExecutionPolicy Bypass -File "C:\Users\Mantenimiento\Desktop\AppWebSalidas\scripts\estado_panol.ps1"
+
+  Debe mostrar ARRIBA en backends, Portal (:5180) y Supervisor.
+  Si Portal dice CAIDO, esperar ~30 s (el supervisor lo relanza)
+  o revisar logs (abajo).
+
+
+==================================================================
+  CONTROL DEL SUPERVISOR
+==================================================================
+  Carpeta scripts:
+    C:\Users\Mantenimiento\Desktop\AppWebSalidas\scripts\
+
+  Instalar / arrancar autostart (una vez, o si se desinstalo):
+    powershell -ExecutionPolicy Bypass -File "C:\Users\Mantenimiento\Desktop\AppWebSalidas\scripts\instalar_autostart_panol.ps1"
+
+  Ver estado:
+    powershell -ExecutionPolicy Bypass -File "C:\Users\Mantenimiento\Desktop\AppWebSalidas\scripts\estado_panol.ps1"
+
+  Frenar servicios + supervisor (la tarea sigue; al reiniciar sesion
+  vuelve a arrancar):
+    powershell -ExecutionPolicy Bypass -File "C:\Users\Mantenimiento\Desktop\AppWebSalidas\scripts\detener_panol.ps1"
+
+  Frenar Y quitar arranque automatico:
+    powershell -ExecutionPolicy Bypass -File "C:\Users\Mantenimiento\Desktop\AppWebSalidas\scripts\detener_panol.ps1" -Desinstalar
+
+  Logs:
+    ...\scripts\logs\supervisor_panol.log
+    ...\scripts\logs\panol_*.log
+
+
+==================================================================
+  COMPORTAMIENTO
+==================================================================
+  - Cada ~20 s revisa puertos y /health; si algo cayo, lo levanta.
+  - Reinicio suave 1 vez al dia entre 20:00 y 22:00.
+  - Al iniciar sesion en Windows, la tarea PortalPanol arranca sola.
+
+  AVISO: NO usar INICIAR_TODO.bat mientras PortalPanol este activa
+  (pelean por los mismos puertos). Para desarrollo manual: primero
+  detener_panol.ps1 -Desinstalar (o solo detener), despues el .bat.
+
+
+==================================================================
+  SI "NO ENCUENTRA LA PAGINA"
+==================================================================
+  1) Confirmar URL con puerto 5180 (no 5173 = etiquetas).
+  2) Correr estado_panol.ps1 (comando de arriba).
+  3) Desde otra PC: firewall debe permitir TCP 5180.
+  4) Si la IP de esta PC cambio, actualizar favoritos / docs
+     (ipconfig -> Direccion IPv4).
+
+
+==================================================================
+  IMPRESION (referencia cruzada)
+==================================================================
+  Estado etiquetas:
+    powershell -ExecutionPolicy Bypass -File "C:\Users\Mantenimiento\Desktop\AppWebSalidas\scripts\estado_impresion.ps1"
+  Guia completa: COMO_IMPRIMIR.txt
+==================================================================

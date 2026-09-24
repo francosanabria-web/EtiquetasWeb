@@ -28,6 +28,7 @@ MODULOS = [
     "usuarios",
     "personal",
     "cajas",
+    "actualizacion",
 ]
 
 ROLES = ["admin", "panol", "supervisor", "jefatura"]
@@ -50,6 +51,7 @@ PLANTILLAS_ROL: dict[str, dict[str, str]] = {
         "usuarios": "sin_acceso",
         "personal": "escritura",
         "cajas": "escritura",
+        "actualizacion": "escritura",
     },
     "supervisor": {
         "inicio": "consulta",
@@ -64,6 +66,7 @@ PLANTILLAS_ROL: dict[str, dict[str, str]] = {
         "usuarios": "sin_acceso",
         "personal": "lectura",
         "cajas": "lectura",
+        "actualizacion": "sin_acceso",
     },
     "jefatura": {
         "inicio": "consulta",
@@ -78,6 +81,7 @@ PLANTILLAS_ROL: dict[str, dict[str, str]] = {
         "usuarios": "sin_acceso",
         "personal": "lectura",
         "cajas": "lectura",
+        "actualizacion": "sin_acceso",
     },
 }
 

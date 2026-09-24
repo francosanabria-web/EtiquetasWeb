@@ -189,6 +189,143 @@ async def delete_inventario(request: Request) -> JSONResponse:
     return JSONResponse(result)
 
 
+# -- Caja Ideal (versionado) --
+async def get_ideal(request: Request) -> JSONResponse:
+    result = service.get_ideal(_token(request), dict(request.query_params))
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
+async def put_ideal(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"detail": "JSON inválido."}, status_code=400)
+    result = service.put_ideal(_token(request), body if isinstance(body, dict) else {})
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result, status_code=201)
+
+
+async def get_ideal_versiones(request: Request) -> JSONResponse:
+    result = service.get_ideal_versiones(_token(request), dict(request.query_params))
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
+# -- Tecnicos-Cards + Historial + KPIs (Slice 2) --
+async def get_tecnicos_cards(request: Request) -> JSONResponse:
+    result = service.get_tecnicos_cards(_token(request), dict(request.query_params))
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
+async def get_inventarios_por_tecnico(request: Request) -> JSONResponse:
+    pid = int(request.path_params["id"])
+    result = service.get_inventarios_por_tecnico(_token(request), pid, dict(request.query_params))
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
+async def get_kpis_resumen(request: Request) -> JSONResponse:
+    result = service.get_kpis_resumen(_token(request), dict(request.query_params))
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
+async def get_kpis_por_tecnico(request: Request) -> JSONResponse:
+    pid = int(request.path_params["id"])
+    result = service.get_kpis_por_tecnico(_token(request), pid)
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
+# -- Limpieza Historial (Fase 2) --
+async def get_limpieza(request: Request) -> JSONResponse:
+    result = service.get_limpieza_list(_token(request), dict(request.query_params))
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
+async def post_limpieza(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"detail": "JSON inválido."}, status_code=400)
+    result = service.create_limpieza(_token(request), body if isinstance(body, dict) else {})
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result, status_code=201)
+
+
+async def patch_limpieza_estado(request: Request) -> JSONResponse:
+    pid = int(request.path_params["id"])
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"detail": "JSON inválido."}, status_code=400)
+    result = service.update_limpieza_estado(_token(request), pid, body if isinstance(body, dict) else {})
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
+async def delete_limpieza(request: Request) -> JSONResponse:
+    pid = int(request.path_params["id"])
+    result = service.delete_limpieza(_token(request), pid)
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
+# -- Asignaciones (Fase 2) --
+async def get_asignaciones(request: Request) -> JSONResponse:
+    result = service.get_asignaciones_list(_token(request), dict(request.query_params))
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
+async def post_asignacion(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"detail": "JSON inválido."}, status_code=400)
+    result = service.create_asignacion(_token(request), body if isinstance(body, dict) else {})
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result, status_code=201)
+
+
+async def patch_asignacion_cerrar(request: Request) -> JSONResponse:
+    pid = int(request.path_params["id"])
+    result = service.cerrar_asignacion(_token(request), pid)
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
 app = Starlette(
     routes=[
         Route("/health", health, methods=["GET"]),
@@ -207,6 +344,20 @@ app = Starlette(
         Route("/api/cajas/inventarios", post_inventario, methods=["POST"]),
         Route("/api/cajas/inventarios/{id:int}/estado", patch_inventario_estado, methods=["PATCH"]),
         Route("/api/cajas/inventarios/{id:int}", delete_inventario, methods=["DELETE"]),
+        Route("/api/cajas/ideal", get_ideal, methods=["GET"]),
+        Route("/api/cajas/ideal", put_ideal, methods=["PUT"]),
+        Route("/api/cajas/ideal/versiones", get_ideal_versiones, methods=["GET"]),
+        Route("/api/cajas/tecnicos-cards", get_tecnicos_cards, methods=["GET"]),
+        Route("/api/cajas/tecnicos/{id:int}/inventarios", get_inventarios_por_tecnico, methods=["GET"]),
+        Route("/api/cajas/kpis/resumen", get_kpis_resumen, methods=["GET"]),
+        Route("/api/cajas/kpis/tecnico/{id:int}", get_kpis_por_tecnico, methods=["GET"]),
+        Route("/api/cajas/limpieza", get_limpieza, methods=["GET"]),
+        Route("/api/cajas/limpieza", post_limpieza, methods=["POST"]),
+        Route("/api/cajas/limpieza/{id:int}/estado", patch_limpieza_estado, methods=["PATCH"]),
+        Route("/api/cajas/limpieza/{id:int}", delete_limpieza, methods=["DELETE"]),
+        Route("/api/cajas/asignaciones", get_asignaciones, methods=["GET"]),
+        Route("/api/cajas/asignaciones", post_asignacion, methods=["POST"]),
+        Route("/api/cajas/asignaciones/{id:int}/cerrar", patch_asignacion_cerrar, methods=["PATCH"]),
     ],
 )
 app.add_middleware(

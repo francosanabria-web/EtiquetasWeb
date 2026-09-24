@@ -58,6 +58,39 @@ async def get_personal_by_id(request: Request) -> JSONResponse:
     return JSONResponse(result)
 
 
+async def get_personal_mail_prefs(request: Request) -> JSONResponse:
+    pid = int(request.path_params["id"])
+    result = service.get_personal_mail_prefs(_token(request), pid)
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
+async def put_personal_mail_prefs(request: Request) -> JSONResponse:
+    pid = int(request.path_params["id"])
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"detail": "JSON inválido."}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"detail": "Body debe ser un objeto."}, status_code=400)
+    prefs = {k: bool(v) for k, v in body.items()}
+    result = service.set_personal_mail_prefs(_token(request), pid, prefs)
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
+async def get_all_personal_mail_prefs(request: Request) -> JSONResponse:
+    result = service.list_all_personal_mail_prefs(_token(request))
+    if isinstance(result, tuple):
+        msg, status = result
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
 async def post_personal(request: Request) -> JSONResponse:
     try:
         body = await request.json()
@@ -98,6 +131,9 @@ app = Starlette(
         Route("/api/areas", get_areas, methods=["GET"]),
         Route("/api/personal", get_personal_list, methods=["GET"]),
         Route("/api/personal/{id:int}", get_personal_by_id, methods=["GET"]),
+        Route("/api/personal/{id:int}/mail-prefs", get_personal_mail_prefs, methods=["GET"]),
+        Route("/api/personal/{id:int}/mail-prefs", put_personal_mail_prefs, methods=["PUT"]),
+        Route("/api/personal/mail-prefs", get_all_personal_mail_prefs, methods=["GET"]),
         Route("/api/personal", post_personal, methods=["POST"]),
         Route("/api/personal/{id:int}", patch_personal, methods=["PATCH"]),
         Route("/api/personal/{id:int}", delete_personal, methods=["DELETE"]),

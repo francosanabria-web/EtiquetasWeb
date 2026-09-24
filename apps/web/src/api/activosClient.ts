@@ -23,6 +23,7 @@ export type ActivoItem = {
   equipo: string;
   sector: string;
   dias_fuera: number;
+  cantidad: number;
   estado: string;
   proveedor: string;
   remito: string;

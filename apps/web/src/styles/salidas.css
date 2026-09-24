@@ -261,6 +261,10 @@
   background: color-mix(in srgb, var(--danger) 6%, transparent);
 }
 
+.sal-row-sel {
+  background: color-mix(in srgb, var(--primary) 10%, transparent) !important;
+}
+
 .sal-link-btn {
   border: 0;
   background: transparent;

@@ -230,16 +230,17 @@ def _carga_inicial() -> None:
 
 
 def _poll_mtime_loop() -> None:
-    """Poll cada 60s por si el Excel cambió y nadie hizo request (robustez).
+    """Poll cada 60s para verificar cambios en DB (salida_historial).
 
     Complementa el check perezoso de store._ensure_fresh() que ya se ejecuta
     en cada request. Este hilo asegura que el dato se refresque incluso
     durante períodos sin tráfico, sin necesidad de POST /refresh manual.
+    En modo DB-only, _ensure_fresh() hace COUNT a salida_historial.
     Si el poll falla, no tumba el servicio: solo loguea.
     """
     import time
 
-    log.info("Reportes: watcher mtime iniciado (poll 60s)")
+    log.info("Reportes: watcher DB poll iniciado (60s)")
     while True:
         try:
             time.sleep(60)

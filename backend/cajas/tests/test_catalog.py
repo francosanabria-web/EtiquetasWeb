@@ -50,6 +50,11 @@ class TestCatalogCRUD(unittest.TestCase):
         conn = db.get_connection()
         try:
             with conn.cursor() as cur:
+                # Limpiar dependientes antes de padres (FK RESTRICT)
+                cur.execute("DELETE FROM cajas_asignaciones")
+                cur.execute("DELETE FROM cajas_limpieza_historial")
+                cur.execute("DELETE FROM cajas_caja_ideal_detalle")
+                cur.execute("DELETE FROM cajas_caja_ideal")
                 cur.execute("DELETE FROM cajas_inventario_detalle")
                 cur.execute("DELETE FROM cajas_inventarios")
                 cur.execute("DELETE FROM cajas_herramientas")

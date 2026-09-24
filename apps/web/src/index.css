@@ -2418,3 +2418,107 @@ button[type="submit"]:hover,
     gap: 12px;
   }
 }
+
+/* —— Cajas Hub Phase 2 Polish — skeletons, stepper, micro-transitions —— */
+.cajas-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.cajas-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(15, 20, 25, 0.08);
+}
+.cajas-fade-in {
+  animation: cajasFadeIn 0.25s ease;
+}
+@keyframes cajasFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.cajas-empty {
+  animation: cajasFadeIn 0.3s ease;
+}
+
+/* Stepper vertical timeline */
+.cajas-stepper {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 14px;
+  position: relative;
+}
+.cajas-step-item {
+  position: relative;
+  padding-left: 18px;
+  padding-bottom: 0.75rem;
+  border-left: 2px solid var(--border, #e5e7eb);
+}
+.cajas-step-item:last-child {
+  border-left-color: transparent;
+  padding-bottom: 0;
+}
+.cajas-step-dot {
+  position: absolute;
+  left: -7px;
+  top: 10px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--surface, #fff);
+  box-shadow: 0 0 0 2px rgba(0,0,0,0.04);
+}
+.cajas-step-card {
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.cajas-step-card:hover {
+  border-color: color-mix(in srgb, var(--primary) 30%, #e5e7eb);
+  box-shadow: 0 4px 12px rgba(15,20,25,0.06);
+}
+.cajas-step-detail {
+  animation: cajasFadeIn 0.2s ease;
+}
+
+/* Modal micro-transitions — backdrop fade + content slide-up */
+.sol-modal-backdrop {
+  animation: cajasBackdropIn 0.2s ease;
+}
+.sol-modal,
+.sol-modal-wide {
+  animation: cajasModalIn 0.22s ease;
+}
+@keyframes cajasBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes cajasModalIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* Skeleton fallback — mirrors kpis.css for Cajas hub when kpis.css not yet loaded */
+.kpi-skeleton-card {
+  background: var(--surface, #fff);
+  border: 0.5px solid var(--border, #dbe3ec);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.kpi-skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #eef2f6 25%, #f8fafc 50%, #eef2f6 75%);
+  background-size: 200% 100%;
+  animation: kpi-pulse 1.2s ease-in-out infinite;
+}
+@keyframes kpi-pulse {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cajas-card,
+  .cajas-fade-in,
+  .cajas-step-card,
+  .sol-modal-backdrop,
+  .sol-modal,
+  .kpi-skeleton-line { animation: none; transition: none; }
+  .cajas-card:hover { transform: none; }
+}

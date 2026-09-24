@@ -92,8 +92,14 @@ def _smtp_creds() -> tuple[str, int, str, str, str]:
     return host, port, user, password, from_addr
 
 
-def _personal_destinatarios() -> list[str]:
-    """Lee mails de Personal (panol.personal) donde activo=1 y email no vacío."""
+def _personal_destinatarios(mail_tipo: str = "diario_gastos") -> list[str]:
+    """Lee mails de Personal filtrados por preferencias de mail.
+    
+    Si personal_mail_prefs existe y tiene registros para mail_tipo,
+    solo retorna los personales donde habilitado=1 para ese tipo.
+    Si la tabla no existe o está vacía, fallback a todos los activos
+    (compatibilidad con implementación previa).
+    """
     if os.environ.get("REPORTES_MAIL_USAR_PERSONAL", "0").strip().lower() in ("0", "false", "no", "off", ""):
         return []
     try:
@@ -105,7 +111,42 @@ def _personal_destinatarios() -> list[str]:
             database=REPORTES_DB_NAME, charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor
         )
         with conn.cursor() as cur:
-            cur.execute("SELECT email FROM personal WHERE activo=1 AND email IS NOT NULL AND email <> ''")
+            # Verificar si la tabla de prefs existe y tiene datos para este tipo
+            cur.execute(
+                "SELECT COUNT(*) AS c FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s",
+                (REPORTES_DB_NAME, "personal_mail_prefs"),
+            )
+            table_exists = cur.fetchone()["c"] > 0
+
+            if table_exists:
+                # Verificar si hay prefs para este mail_tipo
+                cur.execute(
+                    "SELECT COUNT(*) AS c FROM personal_mail_prefs WHERE mail_tipo = %s",
+                    (mail_tipo,),
+                )
+                has_prefs = cur.fetchone()["c"] > 0
+
+                if has_prefs:
+                    # Filtrar por habilitado=1 Y mail_tipo
+                    cur.execute(
+                        """SELECT p.email FROM personal p
+                           INNER JOIN personal_mail_prefs pmp
+                             ON pmp.personal_id = p.id AND pmp.mail_tipo = %s AND pmp.habilitado = 1
+                           WHERE p.activo = 1 AND p.email IS NOT NULL AND p.email <> ''""",
+                        (mail_tipo,),
+                    )
+                else:
+                    # Sin prefs para este tipo -> fallback a todos los activos
+                    cur.execute(
+                        "SELECT email FROM personal WHERE activo=1 AND email IS NOT NULL AND email <> ''"
+                    )
+            else:
+                # Tabla no existe -> fallback a todos los activos
+                cur.execute(
+                    "SELECT email FROM personal WHERE activo=1 AND email IS NOT NULL AND email <> ''"
+                )
+
             rows = cur.fetchall()
             mails = [str(r["email"]).strip() for r in rows if str(r["email"]).strip() and "@" in str(r["email"])]
             return mails
@@ -119,7 +160,7 @@ def _personal_destinatarios() -> list[str]:
             pass
 
 
-def _destinatarios(override: list[str] | None = None) -> list[str]:
+def _destinatarios(override: list[str] | None = None, mail_tipo: str = "diario_gastos") -> list[str]:
     if override is not None:
         dest = [d.strip() for d in override if d and d.strip()]
         if not dest:
@@ -127,7 +168,7 @@ def _destinatarios(override: list[str] | None = None) -> list[str]:
         return list(dict.fromkeys(dest))
     # Base: env var + Personal si está habilitado
     dest_env = [d.strip() for d in REPORTES_MAIL_DESTINATARIOS if d and d.strip()]
-    dest_personal = _personal_destinatarios()
+    dest_personal = _personal_destinatarios(mail_tipo=mail_tipo)
     dest = dest_env + dest_personal
     if not dest:
         raise MailNoConfiguradoError(
@@ -258,7 +299,7 @@ def run_diario_si_habilitado(
     txt, html = armar_cuerpo_diario(fecha_ref, df)
     asunto = f"Reporte Diario de Gasto por Sector ({fecha_ref.strftime('%Y-%m-%d')})"
     fname = f"Reporte_Gastos_{fecha_ref.strftime('%Y-%m-%d')}.xlsx"
-    dest = _destinatarios(destinatarios)
+    dest = _destinatarios(destinatarios, mail_tipo="diario_gastos")
     enviar_con_adjunto_xlsx(
         destinatarios=dest,
         asunto=asunto,
@@ -310,7 +351,7 @@ def run_mensual_si_habilitado(
     txt, html = armar_cuerpo_mensual(y, m, df)
     asunto = f"Reporte Mensual de Gastos ({m:02d}/{y})"
     fname = f"Reporte_Gastos_Mensual_{y}-{m:02d}.xlsx"
-    dest = _destinatarios(destinatarios)
+    dest = _destinatarios(destinatarios, mail_tipo="diario_gastos")
     enviar_con_adjunto_xlsx(
         destinatarios=dest,
         asunto=asunto,

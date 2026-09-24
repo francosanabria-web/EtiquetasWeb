@@ -7,7 +7,7 @@ import {
   type Solicitud,
   type SolicitudTipo,
 } from "../../api/solicitudesClient";
-import BuscadorCatalogo from "./BuscadorCatalogo";
+import BuscadorCatalogo from "../../components/shared/BuscadorCatalogo";
 
 type Props = {
   catalogos: CatalogosSolicitudes;

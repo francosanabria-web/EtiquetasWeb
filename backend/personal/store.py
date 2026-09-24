@@ -70,6 +70,7 @@ def listar_personal(
     activo: int | None = None,
     limit: int = 50,
     offset: int = 0,
+    include_prefs: bool = False,
 ) -> dict[str, Any]:
     conn = get_connection()
     try:
@@ -97,24 +98,52 @@ def listar_personal(
             cur.execute(count_sql, params_count)
             total = cur.fetchone()["c"]
 
-            data_sql = (
-                f"SELECT id, legajo, nombre, email, area_id, tipo, activo "
-                f"FROM personal{where} ORDER BY nombre ASC LIMIT %s OFFSET %s"
-            )
-            cur.execute(data_sql, params + [limit, offset])
-            rows = cur.fetchall()
-
-        items = []
-        for r in rows:
-            items.append({
-                "id": r["id"],
-                "legajo": r["legajo"],
-                "nombre": r["nombre"],
-                "email": r["email"],
-                "area_id": r["area_id"],
-                "tipo": r["tipo"],
-                "activo": bool(r["activo"]),
-            })
+            if include_prefs:
+                data_sql = (
+                    f"SELECT p.id, p.legajo, p.nombre, p.email, p.area_id, p.tipo, p.activo, "
+                    f"COALESCE(pmp.habilitado, 1) AS pref_habilitado, pmp.mail_tipo "
+                    f"FROM personal p "
+                    f"LEFT JOIN personal_mail_prefs pmp ON pmp.personal_id = p.id {where} "
+                    f"ORDER BY p.nombre ASC LIMIT %s OFFSET %s"
+                )
+                cur.execute(data_sql, params + [limit, offset])
+                rows = cur.fetchall()
+                # Agrupar
+                result: dict[int, dict[str, Any]] = {}
+                for r in rows:
+                    pid = r["id"]
+                    if pid not in result:
+                        result[pid] = {
+                            "id": r["id"],
+                            "legajo": r["legajo"],
+                            "nombre": r["nombre"],
+                            "email": r["email"],
+                            "area_id": r["area_id"],
+                            "tipo": r["tipo"],
+                            "activo": bool(r["activo"]),
+                            "prefs": {},
+                        }
+                    if r["mail_tipo"] and r["pref_habilitado"] is not None:
+                        result[pid]["prefs"][r["mail_tipo"]] = bool(r["pref_habilitado"])
+                items = list(result.values())
+            else:
+                data_sql = (
+                    f"SELECT id, legajo, nombre, email, area_id, tipo, activo "
+                    f"FROM personal{where} ORDER BY nombre ASC LIMIT %s OFFSET %s"
+                )
+                cur.execute(data_sql, params + [limit, offset])
+                rows = cur.fetchall()
+                items = []
+                for r in rows:
+                    items.append({
+                        "id": r["id"],
+                        "legajo": r["legajo"],
+                        "nombre": r["nombre"],
+                        "email": r["email"],
+                        "area_id": r["area_id"],
+                        "tipo": r["tipo"],
+                        "activo": bool(r["activo"]),
+                    })
 
         return {"items": items, "total": total}
     finally:
@@ -365,5 +394,104 @@ def contar_personal_con_area(area_id: int) -> int:
             )
             row = cur.fetchone()
         return row["c"]
+    finally:
+        conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# Preferencias de Mail
+# --------------------------------------------------------------------------- #
+
+MAIL_TIPOS_VALIDOS = ("diario_gastos", "activos_fuera")
+
+
+def get_mail_prefs(personal_id: int) -> dict[str, bool]:
+    """Retorna prefs del personal como dict {mail_tipo: bool}."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT mail_tipo, habilitado FROM personal_mail_prefs WHERE personal_id = %s",
+                (personal_id,),
+            )
+            rows = cur.fetchall()
+        return {r["mail_tipo"]: bool(r["habilitado"]) for r in rows}
+    finally:
+        conn.close()
+
+
+def set_mail_prefs(personal_id: int, prefs: dict[str, bool]) -> dict[str, bool]:
+    """Guarda prefs para un personal. prefs: {mail_tipo: bool}.
+    Solo acepta tipos válidos. Retorna prefs guardadas."""
+    valid = {k: bool(v) for k, v in prefs.items() if k in MAIL_TIPOS_VALIDOS}
+    if not valid:
+        return get_mail_prefs(personal_id)
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            for mail_tipo, habilitado in valid.items():
+                cur.execute(
+                    """INSERT INTO personal_mail_prefs (personal_id, mail_tipo, habilitado)
+                       VALUES (%s, %s, %s)
+                       ON DUPLICATE KEY UPDATE habilitado = VALUES(habilitado)""",
+                    (personal_id, mail_tipo, 1 if habilitado else 0),
+                )
+            conn.commit()
+        return get_mail_prefs(personal_id)
+    finally:
+        conn.close()
+
+
+def list_prefs(include_prefs: bool = False) -> list[dict[str, Any]]:
+    """Lista todos los personales con sus prefs si include_prefs=True.
+    Si la tabla no existe o está vacía, retorna todos con prefs vacíos."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            if include_prefs:
+                cur.execute(
+                    """SELECT p.id, p.legajo, p.nombre, p.email, p.area_id, p.tipo, p.activo,
+                               COALESCE(pmp.habilitado, 1) AS pref_habilitado,
+                               pmp.mail_tipo
+                        FROM personal p
+                        LEFT JOIN personal_mail_prefs pmp ON pmp.personal_id = p.id"""
+                )
+                rows = cur.fetchall()
+                # Agrupar prefs por personal
+                result: dict[int, dict[str, Any]] = {}
+                for r in rows:
+                    pid = r["id"]
+                    if pid not in result:
+                        result[pid] = {
+                            "id": r["id"],
+                            "legajo": r["legajo"],
+                            "nombre": r["nombre"],
+                            "email": r["email"],
+                            "area_id": r["area_id"],
+                            "tipo": r["tipo"],
+                            "activo": bool(r["activo"]),
+                            "prefs": {},
+                        }
+                    if r["mail_tipo"] and r["pref_habilitado"] is not None:
+                        result[pid]["prefs"][r["mail_tipo"]] = bool(r["pref_habilitado"])
+                return list(result.values())
+            else:
+                cur.execute(
+                    "SELECT id, legajo, nombre, email, area_id, tipo, activo FROM personal ORDER BY nombre ASC"
+                )
+                rows = cur.fetchall()
+                return [
+                    {
+                        "id": r["id"],
+                        "legajo": r["legajo"],
+                        "nombre": r["nombre"],
+                        "email": r["email"],
+                        "area_id": r["area_id"],
+                        "tipo": r["tipo"],
+                        "activo": bool(r["activo"]),
+                    }
+                    for r in rows
+                ]
     finally:
         conn.close()

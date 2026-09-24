@@ -14,6 +14,7 @@ import {
 } from "../../api/personalClient";
 import PersonalTabla from "./PersonalTabla";
 import PersonalFormModal from "./PersonalFormModal";
+import PersonalMailPrefs from "./PersonalMailPrefs";
 
 const PAGE_SIZE = 25;
 
@@ -47,7 +48,7 @@ export default function PersonalPage() {
     setLoading(true);
     setError(null);
     try {
-      const params: Record<string, string | number | boolean> = { limit: PAGE_SIZE, offset };
+      const params: Record<string, string | number | boolean> = { limit: PAGE_SIZE, offset, include_prefs: 1 };
       if (q) params.q = q;
       if (areaIdFiltro !== "") params.area_id = areaIdFiltro;
       if (tipoFiltro) params.tipo = tipoFiltro;
@@ -169,6 +170,7 @@ export default function PersonalPage() {
               <p><strong>Tipo:</strong> {sel.tipo}</p>
               <p><strong>Área ID:</strong> {sel.area_id ?? "—"}</p>
               <p><strong>Activo:</strong> {sel.activo ? "Sí" : "No"}</p>
+              <PersonalMailPrefs personalId={sel.id} personalNombre={sel.nombre} token={token!} />
               {puedeEscribir && (
                 <>
                   <button type="button" className="btn-primary btn-sm" onClick={() => setCreando(true)}>

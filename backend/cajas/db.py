@@ -80,6 +80,197 @@ def init_db() -> None:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
+            # --- Caja Ideal versionado (Slice 1) ---
+            # Nota: ids autoincrement, singleton activa via transacción en store
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cajas_caja_ideal (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    nombre VARCHAR(100) NOT NULL,
+                    descripcion TEXT NULL,
+                    activa TINYINT(1) NOT NULL DEFAULT 0,
+                    vigente_desde DATETIME NOT NULL,
+                    creado_por INT NULL,
+                    creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_ideal_activa (activa),
+                    INDEX idx_ideal_vigente (vigente_desde)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            # Crear detalle con FK inline; si falla por orden/tipo, fallback a ALTER se maneja abajo
+            # Nota: cajas_herramientas.id es INT UNSIGNED, por lo que herramienta_id debe ser UNSIGNED
+            try:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS cajas_caja_ideal_detalle (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        caja_ideal_id INT NOT NULL,
+                        herramienta_id INT UNSIGNED NOT NULL,
+                        cantidad_minima INT NOT NULL DEFAULT 1,
+                        articulo_codigo VARCHAR(100) NULL,
+                        UNIQUE KEY uq_ideal_herramienta (caja_ideal_id, herramienta_id),
+                        CONSTRAINT fk_ideal_cab FOREIGN KEY (caja_ideal_id) REFERENCES cajas_caja_ideal(id) ON DELETE CASCADE,
+                        CONSTRAINT fk_ideal_herr FOREIGN KEY (herramienta_id) REFERENCES cajas_herramientas(id) ON DELETE RESTRICT
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """
+                )
+            except Exception:
+                # Fallback: crear sin FK y agregar vía ALTER si no existen
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS cajas_caja_ideal_detalle (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        caja_ideal_id INT NOT NULL,
+                        herramienta_id INT UNSIGNED NOT NULL,
+                        cantidad_minima INT NOT NULL DEFAULT 1,
+                        articulo_codigo VARCHAR(100) NULL,
+                        UNIQUE KEY uq_ideal_herramienta (caja_ideal_id, herramienta_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """
+                )
+                # Intentar agregar FKs si no existen (ignorar si ya existen)
+                try:
+                    cur.execute(
+                        "ALTER TABLE cajas_caja_ideal_detalle ADD CONSTRAINT fk_ideal_cab FOREIGN KEY (caja_ideal_id) REFERENCES cajas_caja_ideal(id) ON DELETE CASCADE"
+                    )
+                except Exception:
+                    pass
+                try:
+                    cur.execute(
+                        "ALTER TABLE cajas_caja_ideal_detalle ADD CONSTRAINT fk_ideal_herr FOREIGN KEY (herramienta_id) REFERENCES cajas_herramientas(id) ON DELETE RESTRICT"
+                    )
+                except Exception:
+                    pass
+            # Post-check: asegurar FK herramienta existe (corrige tablas creadas previamente con INT signed)
+            try:
+                cur.execute(
+                    "SELECT COUNT(*) c FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cajas_caja_ideal_detalle' AND CONSTRAINT_NAME = 'fk_ideal_herr'"
+                )
+                has_fk = cur.fetchone()["c"] > 0
+                if not has_fk:
+                    # Intentar convertir columna a UNSIGNED si aún es signed
+                    try:
+                        cur.execute("ALTER TABLE cajas_caja_ideal_detalle MODIFY herramienta_id INT UNSIGNED NOT NULL")
+                    except Exception:
+                        pass
+                    try:
+                        cur.execute(
+                            "ALTER TABLE cajas_caja_ideal_detalle ADD CONSTRAINT fk_ideal_herr FOREIGN KEY (herramienta_id) REFERENCES cajas_herramientas(id) ON DELETE RESTRICT"
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # --- Fase 2: limpieza_historial y asignaciones (DDL idempotente) ---
+            # cajas_limpieza_historial: auditoría de eventos de limpieza
+            # personal.id es INT UNSIGNED → match con UNSIGNED
+            try:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS cajas_limpieza_historial (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        caja_id INT UNSIGNED NOT NULL,
+                        tecnico_id INT UNSIGNED NOT NULL,
+                        fecha DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        estado ENUM('pendiente','realizada','vencida') NOT NULL DEFAULT 'pendiente',
+                        responsable_id INT UNSIGNED NULL,
+                        observaciones TEXT NULL,
+                        creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_limpieza_caja_fecha (caja_id, fecha),
+                        INDEX idx_limpieza_estado_fecha (estado, fecha),
+                        INDEX idx_limpieza_tecnico (tecnico_id),
+                        CONSTRAINT fk_limpieza_caja FOREIGN KEY (caja_id) REFERENCES cajas_cajas(id) ON DELETE RESTRICT,
+                        CONSTRAINT fk_limpieza_tec FOREIGN KEY (tecnico_id) REFERENCES personal(id) ON DELETE RESTRICT,
+                        CONSTRAINT fk_limpieza_resp FOREIGN KEY (responsable_id) REFERENCES personal(id) ON DELETE RESTRICT
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """
+                )
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                # Fallback sin FK (posible mismatch de tipos) — crear tabla y luego intentar ALTER
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS cajas_limpieza_historial (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        caja_id INT UNSIGNED NOT NULL,
+                        tecnico_id INT UNSIGNED NOT NULL,
+                        fecha DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        estado ENUM('pendiente','realizada','vencida') NOT NULL DEFAULT 'pendiente',
+                        responsable_id INT UNSIGNED NULL,
+                        observaciones TEXT NULL,
+                        creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_limpieza_caja_fecha (caja_id, fecha),
+                        INDEX idx_limpieza_estado_fecha (estado, fecha),
+                        INDEX idx_limpieza_tecnico (tecnico_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """
+                )
+                for fk_sql in [
+                    "ALTER TABLE cajas_limpieza_historial ADD CONSTRAINT fk_limpieza_caja FOREIGN KEY (caja_id) REFERENCES cajas_cajas(id) ON DELETE RESTRICT",
+                    "ALTER TABLE cajas_limpieza_historial ADD CONSTRAINT fk_limpieza_tec FOREIGN KEY (tecnico_id) REFERENCES personal(id) ON DELETE RESTRICT",
+                    "ALTER TABLE cajas_limpieza_historial ADD CONSTRAINT fk_limpieza_resp FOREIGN KEY (responsable_id) REFERENCES personal(id) ON DELETE RESTRICT",
+                ]:
+                    try:
+                        cur.execute(fk_sql)
+                    except Exception:
+                        pass
+            # cajas_asignaciones: asignaciones versionadas (singleton activa por caja vía transacción en store)
+            # Uniqueness enforced in store transaction, not via UNIQUE constraint — ver store.crear_asignacion
+            try:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS cajas_asignaciones (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        caja_id INT UNSIGNED NOT NULL,
+                        tecnico_id INT UNSIGNED NOT NULL,
+                        desde DATE NOT NULL,
+                        hasta DATE NULL,
+                        activa TINYINT(1) NOT NULL DEFAULT 1,
+                        creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_asig_caja (caja_id),
+                        INDEX idx_asig_tecnico (tecnico_id),
+                        INDEX idx_asig_activa (activa),
+                        CONSTRAINT fk_asig_caja FOREIGN KEY (caja_id) REFERENCES cajas_cajas(id) ON DELETE RESTRICT,
+                        CONSTRAINT fk_asig_tec FOREIGN KEY (tecnico_id) REFERENCES personal(id) ON DELETE RESTRICT
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """
+                )
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS cajas_asignaciones (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        caja_id INT UNSIGNED NOT NULL,
+                        tecnico_id INT UNSIGNED NOT NULL,
+                        desde DATE NOT NULL,
+                        hasta DATE NULL,
+                        activa TINYINT(1) NOT NULL DEFAULT 1,
+                        creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_asig_caja (caja_id),
+                        INDEX idx_asig_tecnico (tecnico_id),
+                        INDEX idx_asig_activa (activa)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """
+                )
+                for fk_sql in [
+                    "ALTER TABLE cajas_asignaciones ADD CONSTRAINT fk_asig_caja FOREIGN KEY (caja_id) REFERENCES cajas_cajas(id) ON DELETE RESTRICT",
+                    "ALTER TABLE cajas_asignaciones ADD CONSTRAINT fk_asig_tec FOREIGN KEY (tecnico_id) REFERENCES personal(id) ON DELETE RESTRICT",
+                ]:
+                    try:
+                        cur.execute(fk_sql)
+                    except Exception:
+                        pass
         conn.commit()
     finally:
         conn.close()
@@ -161,8 +352,13 @@ def _verificar_sesion_opaca(token: str) -> dict[str, Any] | None:
 
 
 def verificar_permiso(token: str, permiso_requerido: str) -> dict[str, Any] | None:
-    """Verifica JWT y permisos del módulo cajas.
+    """Verifica JWT y permisos del módulo cajas (strict exact match).
+
     Soporta JWT (legado) y token opaco de backend/usuarios (real).
+    Reglas estrictas:
+    - :lectura → nivel in (lectura, escritura)
+    - :escritura → nivel == escritura
+    - else → None (sin catch-all)
     Retorna el payload si tiene el permiso, None si no autenticado o sin permiso.
     """
     payload = _verificar_jwt(token)
@@ -174,8 +370,6 @@ def verificar_permiso(token: str, permiso_requerido: str) -> dict[str, Any] | No
             return payload
         if permiso_requerido.endswith(":escritura") and nivel == "escritura":
             return payload
-        if nivel != "sin_acceso":
-            return payload
         return None
     payload2 = _verificar_sesion_opaca(token)
     if not payload2:
@@ -184,7 +378,5 @@ def verificar_permiso(token: str, permiso_requerido: str) -> dict[str, Any] | No
     if permiso_requerido.endswith(":lectura") and nivel2 in ("lectura", "escritura"):
         return payload2
     if permiso_requerido.endswith(":escritura") and nivel2 == "escritura":
-        return payload2
-    if nivel2 != "sin_acceso":
         return payload2
     return None

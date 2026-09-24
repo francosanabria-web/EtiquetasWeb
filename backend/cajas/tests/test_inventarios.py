@@ -70,13 +70,19 @@ class TestInventoryCRUD(unittest.TestCase):
         conn = db.get_connection()
         try:
             with conn.cursor() as cur:
+                cur.execute("DELETE FROM cajas_asignaciones WHERE caja_id IN (SELECT id FROM cajas_cajas WHERE codigo LIKE 'INVCAJA%')")
+                cur.execute("DELETE FROM cajas_limpieza_historial WHERE caja_id IN (SELECT id FROM cajas_cajas WHERE codigo LIKE 'INVCAJA%')")
                 cur.execute("DELETE FROM cajas_inventario_detalle")
                 cur.execute("DELETE FROM cajas_inventarios")
                 cur.execute("DELETE FROM cajas_herramientas WHERE codigo LIKE 'INVTOOL%'")
                 cur.execute("DELETE FROM cajas_cajas WHERE codigo LIKE 'INVCAJA%'")
             conn.commit()
         finally:
-            conn.close()
+            try:
+                if conn.open:
+                    conn.close()
+            except Exception:
+                pass
         # Crear caja de prueba
         cls.caja_id = _setup_caja()
         # Crear herramienta de prueba

@@ -32,12 +32,16 @@ export default function PersonalFormModal({ areas, editing, onGuardado, onCancel
       return;
     }
     try {
-      const data: Record<string, unknown> = { nombre: nombre.trim(), tipo, activo };
-      if (legajo.trim()) data.legajo = legajo.trim();
-      if (email.trim()) data.email = email.trim();
-      if (areaId !== "") data.area_id = areaId;
-
       if (editing) {
+        // Para edición: siempre enviar area_id (null para "Sin área") para permitir limpiar área
+        const data: Record<string, unknown> = {
+          nombre: nombre.trim(),
+          tipo,
+          activo,
+          area_id: areaId === "" ? null : areaId,
+        };
+        if (legajo.trim()) data.legajo = legajo.trim();
+        if (email.trim()) data.email = email.trim();
         const updated = await updatePersonal(token, editing.id, data);
         onGuardado(updated);
       } else {
@@ -88,7 +92,13 @@ export default function PersonalFormModal({ areas, editing, onGuardado, onCancel
       </div>
       <label>
         Área
-        <select value={areaId} onChange={(e) => setAreaId(Number(e.target.value))}>
+        <select
+          value={areaId}
+          onChange={(e) => {
+            const v = e.target.value;
+            setAreaId(v === "" ? "" : Number(v));
+          }}
+        >
           <option value="">— Sin área —</option>
           {areas.map((a) => (
             <option key={a.id} value={a.id}>{a.nombre}</option>

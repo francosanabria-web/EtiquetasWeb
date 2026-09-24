@@ -1,5 +1,6 @@
 /**
- * CajasPage — Módulo completo de gestión de cajas y herramientas con datagrid, filtros y modales.
+ * CajasPage — Hub de 3 cards (Ideal / Inventario por Técnico / KPIs) + tablas clásicas fallback.
+ * Single route /admin/cajas — no changes to App.tsx/navegacion.ts.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -7,12 +8,22 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { permisoDe } from "../../config/navegacion";
 import {
-  getCajas, getHerramientas,
-  type Caja, type Herramienta,
+  getCajas,
+  getHerramientas,
+  getIdeal,
+  type Caja,
+  type Herramienta,
+  type Ideal,
 } from "../../api/cajasClient";
 import CajasTabla from "./CajasTabla";
 import CajaFormModal from "./CajaFormModal";
 import HerramientaFormModal from "./HerramientaFormModal";
+import IdealCard from "./IdealCard";
+import IdealEditorModal from "./IdealEditorModal";
+import TecnicosCards from "./TecnicosCards";
+import KpisPanel from "./KpisPanel";
+import LimpiezaPanel from "./LimpiezaPanel";
+import AsignacionesPanel from "./AsignacionesPanel";
 
 const PAGE_SIZE = 25;
 
@@ -22,6 +33,49 @@ export default function CajasPage() {
   const puedeEscribir = permisoDe(usuario, "cajas") === "escritura";
   const puedeLeer = permisoDe(usuario, "cajas") !== "sin_acceso";
 
+  // --- Hub: Caja Ideal state ---
+  const [ideal, setIdeal] = useState<Ideal | null>(null);
+  const [idealLoading, setIdealLoading] = useState(true);
+  const [idealError, setIdealError] = useState<string | null>(null);
+  const [showIdealEditor, setShowIdealEditor] = useState(false);
+  const [hubAviso, setHubAviso] = useState<string | null>(null);
+  const [hubRefreshKey, setHubRefreshKey] = useState(0);
+
+  const cargarIdeal = useCallback(async () => {
+    if (!token || !puedeLeer) return;
+    setIdealLoading(true);
+    setIdealError(null);
+    try {
+      const data = await getIdeal(token);
+      // Backend returns id null when no ideal defined — keep as null-ish for empty state
+      if (data.id === null || data.id === undefined) {
+        setIdeal(data);
+      } else {
+        setIdeal(data);
+      }
+    } catch (e) {
+      setIdealError(e instanceof Error ? e.message : "No se pudo cargar la Caja Ideal.");
+    } finally {
+      setIdealLoading(false);
+    }
+  }, [token, puedeLeer]);
+
+  useEffect(() => {
+    void cargarIdeal();
+  }, [cargarIdeal]);
+
+  const handleIdealSaved = useCallback(
+    async (saved: Ideal) => {
+      setIdeal(saved);
+      setHubAviso(`Caja Ideal "${saved.nombre ?? ""}" guardada.`);
+      setHubRefreshKey((k) => k + 1);
+      // Re-fetch to ensure vigente_desde etc are fresh
+      await cargarIdeal();
+    },
+    [cargarIdeal],
+  );
+
+  // --- Classic tables fallback (kept for transition, collapsed) ---
   const [cajas, setCajas] = useState<Caja[]>([]);
   const [herramientas, setHerramientas] = useState<Herramienta[]>([]);
   const [cajasTotal, setCajasTotal] = useState(0);
@@ -30,18 +84,11 @@ export default function CajasPage() {
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
 
-  // Filtros cajas
   const [q, setQ] = useState("");
   const [activaFiltro, setActivaFiltro] = useState<boolean | "">("");
-
-  // Filtros herramientas
   const [catFiltro, setCatFiltro] = useState("");
-
-  // Paginación — offsets separados para evitar paginación cruzada
   const [offsetCajas, setOffsetCajas] = useState(0);
   const [offsetHerramientas, setOffsetHerramientas] = useState(0);
-
-  // Modales
   const [selCaja, setSelCaja] = useState<Caja | null>(null);
   const [selHerramienta, setSelHerramienta] = useState<Herramienta | null>(null);
   const [creandoCaja, setCreandoCaja] = useState(false);
@@ -52,8 +99,18 @@ export default function CajasPage() {
     setLoading(true);
     setError(null);
     try {
-      const cData = await getCajas(token, { q, activa: activaFiltro !== "" ? activaFiltro : undefined, limit: PAGE_SIZE, offset: offsetCajas });
-      const hData = await getHerramientas(token, { q: "", categoria: catFiltro || undefined, limit: PAGE_SIZE, offset: offsetHerramientas });
+      const cData = await getCajas(token, {
+        q,
+        activa: activaFiltro !== "" ? activaFiltro : undefined,
+        limit: PAGE_SIZE,
+        offset: offsetCajas,
+      });
+      const hData = await getHerramientas(token, {
+        q: "",
+        categoria: catFiltro || undefined,
+        limit: PAGE_SIZE,
+        offset: offsetHerramientas,
+      });
       setCajas(cData.items);
       setCajasTotal(cData.total);
       setHerramientas(hData.items);
@@ -65,7 +122,9 @@ export default function CajasPage() {
     }
   }, [token, q, activaFiltro, catFiltro, offsetCajas, offsetHerramientas, puedeLeer]);
 
-  useEffect(() => { void cargar(); }, [cargar]);
+  useEffect(() => {
+    void cargar();
+  }, [cargar]);
 
   const cajasPages = Math.ceil(cajasTotal / PAGE_SIZE);
   const herramientasPages = Math.ceil(herramientasTotal / PAGE_SIZE);
@@ -84,28 +143,64 @@ export default function CajasPage() {
     await cargar();
   };
 
-  const handleQChange = (v: string) => { setQ(v); setOffsetCajas(0); };
-  const handleCatChange = (v: string) => { setCatFiltro(v); setOffsetHerramientas(0); };
+  const handleQChange = (v: string) => {
+    setQ(v);
+    setOffsetCajas(0);
+  };
+  const handleCatChange = (v: string) => {
+    setCatFiltro(v);
+    setOffsetHerramientas(0);
+  };
+
+  if (!puedeLeer) {
+    return (
+      <div className="page-content sol-page">
+        <header className="page-header sol-header">
+          <div>
+            <h1>Cajas de Herramientas</h1>
+            <p className="sub">Gestión de cajas y herramientas. Busca, filtra y administra registros.</p>
+          </div>
+        </header>
+        <p className="error" role="status">
+          No tenés permiso para ver este módulo.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="page-content sol-page">
       <header className="page-header sol-header">
         <div>
           <h1>Cajas de Herramientas</h1>
-          <p className="sub">Gestión de cajas y herramientas. Busca, filtra y administra registros.</p>
+          <p className="sub">
+            Hub de gestión — Caja Ideal, inventario por técnico y KPIs de completitud. La grilla clásica sigue disponible abajo.
+          </p>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          {puedeLeer && (
-            <button type="button" className="btn-ghost" onClick={() => navigate("/admin/cajas/inventarios")}>
-              Ver Inventarios
-            </button>
-          )}
+          <button type="button" className="btn-ghost" onClick={() => navigate("/admin/cajas/inventarios")}>
+            Ver Inventarios
+          </button>
           {puedeEscribir && (
             <>
-              <button type="button" className="btn-primary" onClick={() => { setSelCaja(null); setCreandoCaja(true); }}>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  setSelCaja(null);
+                  setCreandoCaja(true);
+                }}
+              >
                 + Nueva Caja
               </button>
-              <button type="button" className="btn-primary" onClick={() => { setSelHerramienta(null); setCreandoHerramienta(true); }}>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  setSelHerramienta(null);
+                  setCreandoHerramienta(true);
+                }}
+              >
                 + Nueva Herramienta
               </button>
             </>
@@ -115,75 +210,180 @@ export default function CajasPage() {
 
       {error && <p className="error" role="status">{error}</p>}
       {aviso && <p className="minuta-ok" role="status">{aviso}</p>}
+      {hubAviso && <p className="minuta-ok" role="status">{hubAviso}</p>}
+      {idealError && !idealLoading && <p className="error" role="status">{idealError}</p>}
 
-      {/* Filtros Cajas */}
-      <div className="sol-filters">
-        <label>
-          Buscar cajas
-          <input value={q} onChange={(e) => handleQChange(e.target.value)} placeholder="Buscar por código…" />
-        </label>
-        <label>
-          Activa
-          <select value={activaFiltro === "" ? "" : activaFiltro ? "1" : "0"} onChange={(e) => { setActivaFiltro(e.target.value === "" ? "" : e.target.value === "1"); setOffsetCajas(0); }}>
-            <option value="">Todas</option>
-            <option value="1">Sí</option>
-            <option value="0">No</option>
-          </select>
-        </label>
+      {/* Hub grid — 3 cards responsive */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+          gap: "1rem",
+          alignItems: "start",
+          marginBottom: "1rem",
+        }}
+      >
+        <IdealCard
+          ideal={ideal}
+          loading={idealLoading}
+          error={idealError}
+          onEdit={() => setShowIdealEditor(true)}
+          puedeEscribir={puedeEscribir}
+        />
+        <TecnicosCards token={token} refreshKey={hubRefreshKey} />
+        <KpisPanel token={token} onDefineIdeal={() => setShowIdealEditor(true)} refreshKey={hubRefreshKey} />
       </div>
 
-      {/* Filtros Herramientas */}
-      <div className="sol-filters">
-        <label>
-          Categoría
-          <select value={catFiltro} onChange={(e) => handleCatChange(e.target.value)}>
-            <option value="">Todas</option>
-            <option value="HERRAMIENTA">Herramienta</option>
-            <option value="REPUESTO">Repuesto</option>
-            <option value="ACCESORIO">Accesorio</option>
-            <option value="MEDIDA">Medida</option>
-            <option value="OTRO">Otro</option>
-          </select>
-        </label>
-      </div>
-
-      <div className="sol-layout">
-        <div className="sol-table-wrap">
-          <CajasTabla
-            cajas={cajas} herramientas={herramientas} loading={loading}
-            selectedCajaId={selCaja?.id ?? null} selectedHerramientaId={selHerramienta?.id ?? null}
-            onSelectCaja={setSelCaja} onSelectHerramienta={setSelHerramienta}
-          />
+      {/* Limpieza & Asignaciones — Fase 2 audit panels (colapsable para no inflar hub) */}
+      <details className="sol-table-wrap" style={{ marginTop: "0.25rem" }}>
+        <summary style={{ cursor: "pointer", padding: "0.75rem 1rem", fontWeight: 700, fontSize: "0.92rem", listStyle: "revert" }}>
+          Limpieza & Asignaciones — auditoría (últimos 5) — click para expandir
+        </summary>
+        <div
+          style={{
+            padding: "0 1rem 1rem",
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+            gap: "1rem",
+            alignItems: "start",
+          }}
+        >
+          <LimpiezaPanel token={token} refreshKey={hubRefreshKey} />
+          <AsignacionesPanel token={token} refreshKey={hubRefreshKey} onChanged={() => setHubRefreshKey((k) => k + 1)} />
         </div>
-      </div>
+      </details>
 
-      {/* Paginación Cajas */}
-      {cajasPages > 1 && (
-        <div className="sol-pagination">
-          <button type="button" className="btn-ghost btn-sm" disabled={offsetCajas === 0} onClick={() => setOffsetCajas(offsetCajas - PAGE_SIZE)}>Anterior</button>
-          <span>Página {Math.floor(offsetCajas / PAGE_SIZE) + 1} de {cajasPages}</span>
-          <button type="button" className="btn-ghost btn-sm" disabled={offsetCajas + PAGE_SIZE >= cajasTotal} onClick={() => setOffsetCajas(offsetCajas + PAGE_SIZE)}>Siguiente</button>
-        </div>
-      )}
-
-      {/* Paginación Herramientas */}
-      {herramientasPages > 1 && (
-        <div className="sol-pagination">
-          <button type="button" className="btn-ghost btn-sm" disabled={offsetHerramientas === 0} onClick={() => setOffsetHerramientas(offsetHerramientas - PAGE_SIZE)}>Anterior</button>
-          <span>Página {Math.floor(offsetHerramientas / PAGE_SIZE) + 1} de {herramientasPages}</span>
-          <button type="button" className="btn-ghost btn-sm" disabled={offsetHerramientas + PAGE_SIZE >= herramientasTotal} onClick={() => setOffsetHerramientas(offsetHerramientas + PAGE_SIZE)}>Siguiente</button>
+      {/* Ideal editor modal */}
+      {showIdealEditor && token && (
+        <div className="sol-modal-backdrop" role="dialog" aria-modal="true">
+          <div className="sol-modal sol-modal-wide">
+            <IdealEditorModal
+              ideal={ideal && ideal.id !== null ? ideal : null}
+              token={token}
+              onClose={() => setShowIdealEditor(false)}
+              onSaved={handleIdealSaved}
+            />
+          </div>
         </div>
       )}
+
+      {/* Fallback: tablas clásicas colapsables */}
+      <details className="sol-table-wrap" style={{ marginTop: "0.5rem" }}>
+        <summary style={{ cursor: "pointer", padding: "0.75rem 1rem", fontWeight: 700, fontSize: "0.95rem", listStyle: "revert" }}>
+          Tablas clásicas (Cajas y Herramientas) — fallback
+        </summary>
+        <div style={{ padding: "0 1rem 1rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
+          <div className="sol-filters" style={{ marginTop: "0.75rem" }}>
+            <label>
+              Buscar cajas
+              <input value={q} onChange={(e) => handleQChange(e.target.value)} placeholder="Buscar por código…" />
+            </label>
+            <label>
+              Activa
+              <select
+                value={activaFiltro === "" ? "" : activaFiltro ? "1" : "0"}
+                onChange={(e) => {
+                  setActivaFiltro(e.target.value === "" ? "" : e.target.value === "1");
+                  setOffsetCajas(0);
+                }}
+              >
+                <option value="">Todas</option>
+                <option value="1">Sí</option>
+                <option value="0">No</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="sol-filters">
+            <label>
+              Categoría
+              <select value={catFiltro} onChange={(e) => handleCatChange(e.target.value)}>
+                <option value="">Todas</option>
+                <option value="HERRAMIENTA">Herramienta</option>
+                <option value="REPUESTO">Repuesto</option>
+                <option value="ACCESORIO">Accesorio</option>
+                <option value="MEDIDA">Medida</option>
+                <option value="OTRO">Otro</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="sol-layout">
+            <div className="sol-table-wrap">
+              <CajasTabla
+                cajas={cajas}
+                herramientas={herramientas}
+                loading={loading}
+                selectedCajaId={selCaja?.id ?? null}
+                selectedHerramientaId={selHerramienta?.id ?? null}
+                onSelectCaja={setSelCaja}
+                onSelectHerramienta={setSelHerramienta}
+              />
+            </div>
+          </div>
+
+          {cajasPages > 1 && (
+            <div className="sol-pagination">
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                disabled={offsetCajas === 0}
+                onClick={() => setOffsetCajas(offsetCajas - PAGE_SIZE)}
+              >
+                Anterior
+              </button>
+              <span>
+                Página {Math.floor(offsetCajas / PAGE_SIZE) + 1} de {cajasPages}
+              </span>
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                disabled={offsetCajas + PAGE_SIZE >= cajasTotal}
+                onClick={() => setOffsetCajas(offsetCajas + PAGE_SIZE)}
+              >
+                Siguiente
+              </button>
+            </div>
+          )}
+
+          {herramientasPages > 1 && (
+            <div className="sol-pagination">
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                disabled={offsetHerramientas === 0}
+                onClick={() => setOffsetHerramientas(offsetHerramientas - PAGE_SIZE)}
+              >
+                Anterior
+              </button>
+              <span>
+                Página {Math.floor(offsetHerramientas / PAGE_SIZE) + 1} de {herramientasPages}
+              </span>
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                disabled={offsetHerramientas + PAGE_SIZE >= herramientasTotal}
+                onClick={() => setOffsetHerramientas(offsetHerramientas + PAGE_SIZE)}
+              >
+                Siguiente
+              </button>
+            </div>
+          )}
+        </div>
+      </details>
 
       {/* Modal creación/edición Caja */}
-      {creandoCaja && (
+      {creandoCaja && token && (
         <div className="sol-modal-backdrop" role="dialog" aria-modal="true">
           <div className="sol-modal sol-modal-wide">
             <CajaFormModal
               editing={selCaja}
               onGuardado={handleGuardarCaja}
-              onCancelar={() => { setCreandoCaja(false); setSelCaja(null); }}
-              token={token!}
+              onCancelar={() => {
+                setCreandoCaja(false);
+                setSelCaja(null);
+              }}
+              token={token}
               cargando={false}
             />
           </div>
@@ -191,14 +391,17 @@ export default function CajasPage() {
       )}
 
       {/* Modal creación/edición Herramienta */}
-      {creandoHerramienta && (
+      {creandoHerramienta && token && (
         <div className="sol-modal-backdrop" role="dialog" aria-modal="true">
           <div className="sol-modal sol-modal-wide">
             <HerramientaFormModal
               editing={selHerramienta}
               onGuardado={handleGuardarHerramienta}
-              onCancelar={() => { setCreandoHerramienta(false); setSelHerramienta(null); }}
-              token={token!}
+              onCancelar={() => {
+                setCreandoHerramienta(false);
+                setSelHerramienta(null);
+              }}
+              token={token}
               cargando={false}
             />
           </div>
