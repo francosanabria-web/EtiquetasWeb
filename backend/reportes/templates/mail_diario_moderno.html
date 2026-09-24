@@ -82,27 +82,25 @@
     </div>
 
     <div class="content">
-      <p style="font-size:13px; color:#4a5568; line-height:1.5; margin:0 0 10px 0;">
-        Adjunto: <b>Reporte_Gastos_{{FECHA_ISO}}.xlsx</b> con hojas por sector, resumen y día a día.
-        Ante cualquier diferencia, responder a este correo o contactar a Pañol.
-      </p>
+       <!-- TABLA_MANT_LINEA_DIA_A_DIA: Cuadro 1 — Gasto por día línea por línea (Mantenimiento) -->
+       {{TABLA_MANT_LINEA_DIA_A_DIA}}
 
-      <!-- BLOQUES_POR_SECTOR: el backend reemplaza este marcador con los bloques HTML por sector -->
-      {{BLOQUES_SECTOR}}
+       <!-- RESUMEN_DIA_A_DIA: Cuadro 2 — Gasto día por día de todos los sectores -->
+       {{TABLA_RESUMEN_DIA_A_DIA}}
 
-      <!-- TABLA_DETALLE_GLOBAL: opcional, si querés tabla única filtrada (preview usa esta) -->
-      {{TABLA_DETALLE}}
+       <!-- BLOQUES_POR_SECTOR: Detalle por sector -->
+       {{BLOQUES_SECTOR}}
 
-      <!-- RESUMEN_DIA_A_DIA -->
-      {{TABLA_RESUMEN_DIA_A_DIA}}
+       <!-- TABLA_DETALLE_GLOBAL: opcional, si querés tabla única filtrada (preview usa esta) -->
+       {{TABLA_DETALLE}}
 
-      <p style="text-align:center; margin:22px 0 0 0;">
-        <a class="cta" href="#">Ver detalle completo en portal →</a>
-      </p>
-    </div>
+       <p style="text-align:center; margin:22px 0 0 0;">
+         <a class="cta" href="#">Ver detalle completo en portal →</a>
+       </p>
+     </div>
 
     <div class="footer">
-      Sistema Pañol — Mantenimiento OZLA &nbsp;•&nbsp; {{TIMESTAMP}}
+       Sistemas pañol - Mantenimiento - {{TIMESTAMP}}
     </div>
   </div>
 </div>

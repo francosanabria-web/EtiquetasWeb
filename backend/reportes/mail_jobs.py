@@ -1,25 +1,27 @@
 # -*- coding: utf-8 -*-
-"""Scaffold de envío diario/mensual de gastos — CONFIGURADO PERO DESACTIVADO.
+"""Scaffold de envío diario/mensual/activos — CONFIGURADO PERO DESACTIVADO POR DEFECTO.
 
 No arranca schedulers ni envía mails reales mientras:
   REPORTES_MAIL_DIARIO_ENABLED=0
   REPORTES_MAIL_MENSUAL_ENABLED=0
+  REPORTES_MAIL_ACTIVOS_ENABLED=0
 
 Formato del adjunto = misma Excel Table que GET /api/reportes/export.xlsx
 (columnas del detalle del mail escritorio + SECTOR).
 
+Para activos fuera, usar mail_activos.py independiente (mismo .env, misma lógica SMTP).
+
 Cómo activar después
 --------------------
 1. Configurar SMTP (mismas vars que email_service):
-     PANOL_SMTP_USER / PANOL_SMTP_PASSWORD / PANOL_SMTP_FROM
+      PANOL_SMTP_USER / PANOL_SMTP_PASSWORD / PANOL_SMTP_FROM
 2. REPORTES_MAIL_DESTINATARIOS=a@x.com,b@y.com
-3. REPORTES_MAIL_DIARIO_ENABLED=1  (y/o MENSUAL=1)
+3. REPORTES_MAIL_DIARIO_ENABLED=1  (y/o MENSUAL=1 / ACTIVOS=1)
 4. Programar tarea Windows / supervisor que llame:
-     python -c "from mail_jobs import run_diario_si_habilitado; print(run_diario_si_habilitado())"
-   o POST /api/reportes/mail/diario (solo si el flag está en 1; si no, 403).
-5. ⚠️ Aún falta portar el cuerpo HTML completo multi-sector del escritorio
-   (resúmenes + día a día + líneas Mant.). Hoy el scaffold envía un resumen
-   simple + adjunto Excel Table de movimientos del período.
+      python -c "from mail_jobs import run_diario_si_habilitado; print(run_diario_si_habilitado())"
+    o POST /api/reportes/mail/diario (solo si el flag está en 1; si no, 403).
+     Cuerpo HTML: mail_diario_moderno.html (bloques por sector, tabla día a día, acumulado mes).
+     Usa armar_cuerpo_diario_moderno() como cuerpo de envío.
 """
 
 from __future__ import annotations
@@ -45,6 +47,7 @@ from config import (
     REPORTES_MAIL_MENSUAL_DIA,
     REPORTES_MAIL_MENSUAL_ENABLED,
     REPORTES_MAIL_MENSUAL_HORA,
+    REPORTES_MAIL_ACTIVOS_ENABLED,
 )
 from exports import build_xlsx_tabla
 from store import ReportesStore
@@ -64,6 +67,7 @@ def mail_status() -> dict[str, Any]:
     return {
         "diario_enabled": REPORTES_MAIL_DIARIO_ENABLED,
         "mensual_enabled": REPORTES_MAIL_MENSUAL_ENABLED,
+        "activos_enabled": REPORTES_MAIL_ACTIVOS_ENABLED,
         "diario_hora": REPORTES_MAIL_DIARIO_HORA,
         "mensual_dia": REPORTES_MAIL_MENSUAL_DIA,
         "mensual_hora": REPORTES_MAIL_MENSUAL_HORA,
@@ -111,7 +115,6 @@ def _personal_destinatarios(mail_tipo: str = "diario_gastos") -> list[str]:
             database=REPORTES_DB_NAME, charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor
         )
         with conn.cursor() as cur:
-            # Verificar si la tabla de prefs existe y tiene datos para este tipo
             cur.execute(
                 "SELECT COUNT(*) AS c FROM information_schema.TABLES "
                 "WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s",
@@ -120,7 +123,6 @@ def _personal_destinatarios(mail_tipo: str = "diario_gastos") -> list[str]:
             table_exists = cur.fetchone()["c"] > 0
 
             if table_exists:
-                # Verificar si hay prefs para este mail_tipo
                 cur.execute(
                     "SELECT COUNT(*) AS c FROM personal_mail_prefs WHERE mail_tipo = %s",
                     (mail_tipo,),
@@ -128,7 +130,6 @@ def _personal_destinatarios(mail_tipo: str = "diario_gastos") -> list[str]:
                 has_prefs = cur.fetchone()["c"] > 0
 
                 if has_prefs:
-                    # Filtrar por habilitado=1 Y mail_tipo
                     cur.execute(
                         """SELECT p.email FROM personal p
                            INNER JOIN personal_mail_prefs pmp
@@ -137,12 +138,10 @@ def _personal_destinatarios(mail_tipo: str = "diario_gastos") -> list[str]:
                         (mail_tipo,),
                     )
                 else:
-                    # Sin prefs para este tipo -> fallback a todos los activos
                     cur.execute(
                         "SELECT email FROM personal WHERE activo=1 AND email IS NOT NULL AND email <> ''"
                     )
             else:
-                # Tabla no existe -> fallback a todos los activos
                 cur.execute(
                     "SELECT email FROM personal WHERE activo=1 AND email IS NOT NULL AND email <> ''"
                 )
@@ -166,7 +165,6 @@ def _destinatarios(override: list[str] | None = None, mail_tipo: str = "diario_g
         if not dest:
             raise MailNoConfiguradoError("Sin destinatarios (override vacío).")
         return list(dict.fromkeys(dest))
-    # Base: env var + Personal si está habilitado
     dest_env = [d.strip() for d in REPORTES_MAIL_DESTINATARIOS if d and d.strip()]
     dest_personal = _personal_destinatarios(mail_tipo=mail_tipo)
     dest = dest_env + dest_personal
@@ -296,7 +294,7 @@ def run_diario_si_habilitado(
     store.require_loaded()
     df = _filtrar_por_fecha(store.df, fecha_ref, fecha_ref)
     xlsx = armar_excel_periodo(store, fecha_ref, fecha_ref)
-    txt, html = armar_cuerpo_diario(fecha_ref, df)
+    txt, html = armar_cuerpo_diario_moderno(fecha_ref, df_dia=df)
     asunto = f"Reporte Diario de Gasto por Sector ({fecha_ref.strftime('%Y-%m-%d')})"
     fname = f"Reporte_Gastos_{fecha_ref.strftime('%Y-%m-%d')}.xlsx"
     dest = _destinatarios(destinatarios, mail_tipo="diario_gastos")
@@ -378,7 +376,7 @@ def dry_run_diario(fecha: date | None = None) -> dict[str, Any]:
     store.require_loaded()
     df = _filtrar_por_fecha(store.df, fecha_ref, fecha_ref)
     xlsx = armar_excel_periodo(store, fecha_ref, fecha_ref)
-    txt, html = armar_cuerpo_diario(fecha_ref, df)
+    txt, html = armar_cuerpo_diario_moderno(fecha_ref, df_dia=df)
     return {
         "enviado": False,
         "dry_run": True,
@@ -449,10 +447,50 @@ def _fecha_formateada_ar(fecha: date) -> str:
     return f"{fecha.day}/{fecha.month}/{fecha.year}"
 
 
+def _normalizar_linea_gasto(val) -> str:
+    """Agrupa comprobante como línea (L1…L7, PAÑOL, etc.) para totales de mantenimiento."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return "OTROS"
+    s = str(val).strip().upper()
+    if not s:
+        return "OTROS"
+    if s in ("PAÑ", "PAN", "PAÑOL", "PANOL"):
+        return "PAÑOL"
+    for ln in ("L1", "L2", "L3", "L4", "L5", "L6", "L7"):
+        if s == ln or s.startswith(ln + " ") or s.startswith(ln + "-") or s.startswith(ln + "/"):
+            return ln
+    if s == "PROYECTOS":
+        return "PROYECTOS"
+    return s
+
+
+def _orden_lineas_gasto():
+    return ["PAÑOL"] + [f"L{i}" for i in range(1, 8)] + ["PROYECTOS"]
+
+
+def _gastos_dia_por_linea_mantenimiento_mes(store, fecha_ref, dias_mes):
+    """Por cada día del mes: total de mantenimiento desglosado por línea/pañol."""
+    dia_linea = {}
+    for fd in dias_mes:
+        k = _fecha_formateada_ar(fd)
+        dia_linea[k] = {}
+        df_d = _filtrar_por_fecha(store.df, fd, fd)
+        if df_d is None or df_d.empty or "TIPO_COMPROBANTE" not in df_d.columns or "SECTOR" not in df_d.columns:
+            continue
+        dm = df_d[df_d["SECTOR"].astype(str).str.upper() == "MANTENIMIENTO"].copy()
+        if dm.empty:
+            continue
+        dm["MONTO_TOTAL_SALIDA"] = pd.to_numeric(dm.get("MONTO_TOTAL_SALIDA", 0), errors="coerce").fillna(0.0)
+        dm["_LINEA"] = dm["TIPO_COMPROBANTE"].apply(_normalizar_linea_gasto)
+        g = dm.groupby("_LINEA")["MONTO_TOTAL_SALIDA"].sum()
+        for ln in g.index:
+            dia_linea[k][str(ln)] = float(g[ln])
+    return dia_linea
+
+
 def _bloque_sector_html_moderno(code: str, etiqueta: str, df_sector: pd.DataFrame, g_dia: float, acum_mes: float) -> str:
     est = ESTILO_SECTOR_HTML.get(code, {"bg": "#F8F9F9", "border": "#BDC3C7", "title": "#2C3E50", "th": "#5D6D7E"})
     esc = _html.escape
-    # Tabla detalle
     detalle_cols = ["FECHA", "CODIGO", "DESCRIPCION", "CANTIDAD", "PRECIO_UNITARIO", "MONTO_TOTAL_SALIDA", "TIPO_COMPROBANTE", "NUMERO_ORDEN", "MAQUINA_SITIO", "OPERARIO"]
     cab = [c.replace("_", " ") for c in detalle_cols]
     th_class = code.lower()
@@ -481,11 +519,11 @@ def _bloque_sector_html_moderno(code: str, etiqueta: str, df_sector: pd.DataFram
         filas_html = f"<tr><td colspan=\"{len(detalle_cols)}\" style=\"text-align:center;color:#718096;padding:12px;\">Sin movimientos para este sector el {esc(_fecha_formateada_ar(date.today()))}</td></tr>"
 
     bloque = f"""
-    <div class=\"sector-block {th_class}\">
-      <p class=\"sector-title {th_class}\">{esc(etiqueta)}</p>
-      <p class=\"sector-meta\">Gasto del día: <b>{esc(_formato_pesos_ar(g_dia))}</b> &nbsp;•&nbsp; Acumulado mes: <b>{esc(_formato_pesos_ar(acum_mes))}</b></p>
+    <div class="sector-block {th_class}">
+      <p class="sector-title {th_class}">{esc(etiqueta)}</p>
+      <p class="sector-meta">Gasto del día: <b>{esc(_formato_pesos_ar(g_dia))}</b> &nbsp;•&nbsp; Acumulado mes: <b>{esc(_formato_pesos_ar(acum_mes))}</b></p>
     </div>
-    <div class=\"table-wrap\">
+    <div class="table-wrap">
       <table>
         <thead><tr>{header_html}</tr></thead>
         <tbody>{filas_html}</tbody>
@@ -508,12 +546,10 @@ def armar_cuerpo_diario_moderno(fecha: date, df_dia: pd.DataFrame | None = None)
     filas = int(len(df_dia))
     monto_dia = float(pd.to_numeric(df_dia.get("MONTO_TOTAL_SALIDA", 0), errors="coerce").fillna(0).sum()) if filas else 0.0
 
-    # Acumulado mes hasta fecha inclusive
     desde_mes = date(fecha.year, fecha.month, 1)
     df_mes = _filtrar_por_fecha(store.df, desde_mes, fecha)
     acum_mes = float(pd.to_numeric(df_mes.get("MONTO_TOTAL_SALIDA", 0), errors="coerce").fillna(0).sum()) if not df_mes.empty else 0.0
 
-    # Sectores presentes (orden fijo + extras alfabético)
     presentes: set[str] = set()
     if not df_mes.empty and "SECTOR" in df_mes.columns:
         presentes.update(str(s).strip().upper() for s in df_mes["SECTOR"].dropna().unique())
@@ -529,7 +565,6 @@ def armar_cuerpo_diario_moderno(fecha: date, df_dia: pd.DataFrame | None = None)
     for c in extras:
         orden.append((c, c.replace("_", " ").title()))
 
-    # Totales por sector día y mes
     tot_dia = {}
     tot_mes = {}
     if not df_dia.empty:
@@ -541,28 +576,25 @@ def armar_cuerpo_diario_moderno(fecha: date, df_dia: pd.DataFrame | None = None)
         for k, v in g_m.items():
             tot_mes[str(k).upper()] = float(v)
 
-    # Bloques HTML por sector
     bloques_html = ""
     lineas_txt: list[str] = [
         f"Reporte diario de gastos por sector — {_fecha_formateada_ar(fecha)}",
         f"Movimientos: {filas} | Monto del día: {_formato_pesos_ar(monto_dia)} | Acumulado mes: {_formato_pesos_ar(acum_mes)}",
         "",
     ]
+    sector_lineas_txt: list[str] = []
     for code, et in orden:
         g = tot_dia.get(code, 0.0)
         a = tot_mes.get(code, 0.0)
         df_s = df_dia[df_dia["SECTOR"] == code].copy() if not df_dia.empty and "SECTOR" in df_dia.columns else pd.DataFrame()
         bloques_html += _bloque_sector_html_moderno(code, et, df_s, g, a)
-        lineas_txt.extend([f"{et}: día {_formato_pesos_ar(g)} | mes {_formato_pesos_ar(a)} ({len(df_s)} líneas)"])
+        sector_lineas_txt.extend([f"{et}: día {_formato_pesos_ar(g)} | mes {_formato_pesos_ar(a)} ({len(df_s)} líneas)"])
 
-    # Día a día table (por sector + total)
-    # Build resumen día a día rows
     dias_mes = []
     d = desde_mes
     while d <= fecha:
         dias_mes.append(d)
         d += timedelta(days=1)
-    # totales por día por sector
     totales_por_dia: dict[str, dict[str, float]] = {}
     for fd in dias_mes:
         df_fd = _filtrar_por_fecha(store.df, fd, fd)
@@ -571,41 +603,106 @@ def armar_cuerpo_diario_moderno(fecha: date, df_dia: pd.DataFrame | None = None)
             g = df_fd.groupby("SECTOR")["MONTO_TOTAL_SALIDA"].sum()
             for k, v in g.items():
                 totales_por_dia[_fecha_formateada_ar(fd)][str(k).upper()] = float(v)
-    # Render tabla resumen día a día global
+
+    # ── Cuadro 1: Gastos por línea — Mantenimiento (acumulado del mes) ──
+    # Vertical: Filas = Linea, Cols = Total gastado (como en la app local y la imagen del usuario)
+    dia_linea = _gastos_dia_por_linea_mantenimiento_mes(store, fecha, dias_mes)
+    gl_map: dict[str, float] = {}
+    for k in dia_linea:
+        for ln, val in dia_linea[k].items():
+            gl_map[ln] = gl_map.get(ln, 0.0) + val
+    orden_lineas = _orden_lineas_gasto()
+    lineas_presentes = sorted(
+        [ln for ln in gl_map if gl_map.get(ln, 0.0) > 0],
+        key=lambda x: (orden_lineas.index(x) if x in orden_lineas else 999, x),
+    )
+    mant_lineas_txt: list[str] = []
+    tabla_sin_mant_inner = ""
+    rows_sin_html = ""
+    hdr_sin = ["Sector", "Total mes"]
+    orden_sin_mant = [(c, et) for c, et in orden if c != "MANTENIMIENTO"]
+    if orden_sin_mant:
+        rows_sin_html = ""
+        total_sin = 0.0
+        for c, et in orden_sin_mant:
+            v = float(tot_mes.get(c, 0.0))
+            total_sin += v
+            row = [et, _formato_pesos_ar(v)]
+            rows_sin_html += "<tr>" + "".join(f"<td>{_html.escape(str(x))}</td>" for x in row) + "</tr>"
+        rows_sin_html += "<tr>" + "".join(f"<td><b>{_html.escape(str(x))}</b></td>" for x in ["TOTAL (sin Mant.)", _formato_pesos_ar(total_sin)]) + "</tr>"
+        tabla_sin_mant_inner = f"""
+            <p style="font-size:12px; font-weight:700; color:#2d3748; margin:14px 0 6px 0;">Totales por sector (sin Mantenimiento)</p>
+            <div class="table-wrap" style="max-width:none; margin:0;"><table><thead><tr>{"".join(f"<th>{_html.escape(h)}</th>" for h in hdr_sin)}</tr></thead><tbody>{rows_sin_html}</tbody></table></div>
+            """
+
+    if lineas_presentes:
+        hdr_mant = ["Línea", "Total gastado"]
+        rows_mant_html = ""
+        mant_lineas_txt.append("Gastos por línea — Mantenimiento (acumulado del mes):")
+        for ln in lineas_presentes:
+            row_vals = [ln, _formato_pesos_ar(gl_map[ln])]
+            rows_mant_html += "<tr>" + "".join(f"<td>{_html.escape(str(v))}</td>" for v in row_vals) + "</tr>"
+            mant_lineas_txt.append(" | ".join(str(v) for v in row_vals))
+        if tabla_sin_mant_inner:
+            mant_lineas_txt.append("")
+            mant_lineas_txt.append("Totales por sector (sin Mantenimiento):")
+            for c, et in orden_sin_mant:
+                mant_lineas_txt.append(f"{et} | {_formato_pesos_ar(float(tot_mes.get(c,0.0)))}")
+            mant_lineas_txt.append(f"TOTAL (sin Mant.) | {_formato_pesos_ar(sum(float(tot_mes.get(c,0.0)) for c,_ in orden_sin_mant))}")
+        # Un solo cuadro angosto que contiene ambas tablas siguiendo el hilo del primero
+        tabla_mant_linea_html = (
+            f'<div style="max-width:380px; background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:12px 12px 14px 12px; margin:18px 0;">'
+            f'<p style="font-size:13px; font-weight:700; color:#1a365d; margin:0 0 8px 0;">'
+            f'Gastos por línea — Mantenimiento (acumulado del mes)</p>'
+            f'<div class="table-wrap" style="max-width:none; margin:0;"><table><thead><tr>{"".join(f"<th>{_html.escape(h)}</th>" for h in hdr_mant)}</tr></thead>'
+            f'<tbody>{rows_mant_html}</tbody></table></div>'
+            f'{tabla_sin_mant_inner}'
+            f'</div>'
+        )
+    else:
+        tabla_mant_linea_html = '<p style="font-size:13px; color:#718096; margin:18px 0 8px 0;">Sin movimientos de Mantenimiento en el mes</p>'
+        if tabla_sin_mant_inner:
+            # si no hay mant pero sí otros sectores, mostrar solo el cuadro sin mant en un solo cuadro
+            tabla_mant_linea_html = (
+                f'<div style="max-width:380px; background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:12px 12px 14px 12px; margin:18px 0;">'
+                f'{tabla_sin_mant_inner}'
+                f'</div>'
+            )
+
+    # ── Cuadro 2: Resumen día a día (todos los sectores) — ancho completo como estaba ──
     if orden:
         hdr = ["Fecha"] + [et for _, et in orden] + ["Total día"]
         rows_html = ""
-        lineas_txt.append("")
-        lineas_txt.append("Día a día (todos los sectores):")
+        mant_dia_a_dia_txt: list[str] = ["Día a día (todos los sectores):"]
         for fd in dias_mes:
             k = _fecha_formateada_ar(fd)
             vals = totales_por_dia.get(k, {})
             td = sum(vals.get(code, 0.0) for code, _ in orden)
             row_vals = [k] + [_formato_pesos_ar(vals.get(code, 0.0)) for code, _ in orden] + [_formato_pesos_ar(td)]
             rows_html += "<tr>" + "".join(f"<td>{_html.escape(str(v))}</td>" for v in row_vals) + "</tr>"
-            lineas_txt.append(" | ".join(str(v) for v in row_vals))
-        tabla_resumen = f"""
+            mant_dia_a_dia_txt.append(" | ".join(str(v) for v in row_vals))
+        tabla_resumen_html = f"""
         <p style="font-size:13px; font-weight:700; color:#1a365d; margin:18px 0 8px 0;">Resumen día a día — {fecha.strftime('%m/%Y')}</p>
         <div class="table-wrap"><table><thead><tr>{"".join(f"<th>{_html.escape(h)}</th>" for h in hdr)}</tr></thead><tbody>{rows_html}</tbody></table></div>
         """
     else:
-        tabla_resumen = ""
+        tabla_resumen_html = ""
+        mant_dia_a_dia_txt = []
 
-    # Tabla detalle global (si hay filas)
-    if not df_dia.empty:
-        detalle_cols = ["FECHA", "CODIGO", "DESCRIPCION", "CANTIDAD", "PRECIO_UNITARIO", "MONTO_TOTAL_SALIDA", "TIPO_COMPROBANTE", "NUMERO_ORDEN", "MAQUINA_SITIO", "OPERARIO", "SECTOR"]
-        # Use TXT only
-        pass
-        tabla_detalle = ""
-    else:
-        tabla_detalle = ""
+    tabla_detalle = ""
 
-    # Load template
+    # ── Reordenar lineas_txt: Mant línea por línea, luego Día a día, luego detalle por sector ──
+    lineas_txt = (
+        lineas_txt[:3]  # header lines
+        + mant_lineas_txt
+        + mant_dia_a_dia_txt
+        + sector_lineas_txt
+    )
+
     tpl_path = _Path(__file__).resolve().parent / "templates" / "mail_diario_moderno.html"
     try:
         tpl = tpl_path.read_text(encoding="utf-8")
     except Exception:
-        # fallback minimal
         tpl = "<html><body><h1>Reporte {{FECHA_ISO}}</h1>{{BLOQUES_SECTOR}}</body></html>"
 
     html_out = tpl.replace("{{FECHA_ISO}}", fecha.isoformat())
@@ -615,11 +712,11 @@ def armar_cuerpo_diario_moderno(fecha: date, df_dia: pd.DataFrame | None = None)
     html_out = html_out.replace("{{ACUMULADO_MES}}", _formato_pesos_ar(acum_mes))
     sectores_resumen = ", ".join(f"{et}: {_formato_pesos_ar(tot_dia.get(code,0.0))}" for code, et in orden) if orden else "(sin sectores)"
     html_out = html_out.replace("{{SECTORES_RESUMEN}}", _html.escape(sectores_resumen))
+    html_out = html_out.replace("{{TABLA_MANT_LINEA_DIA_A_DIA}}", tabla_mant_linea_html)
+    html_out = html_out.replace("{{TABLA_RESUMEN_DIA_A_DIA}}", tabla_resumen_html)
     html_out = html_out.replace("{{BLOQUES_SECTOR}}", bloques_html)
     html_out = html_out.replace("{{TABLA_DETALLE}}", tabla_detalle)
-    html_out = html_out.replace("{{TABLA_RESUMEN_DIA_A_DIA}}", tabla_resumen)
     html_out = html_out.replace("{{TIMESTAMP}}", pd.Timestamp.now().strftime("%d/%m/%Y %H:%M"))
-    # Clean any leftover placeholders
     html_out = html_out.replace("{{", "").replace("}}", "")
 
     txt = "\n".join(lineas_txt)
@@ -637,7 +734,6 @@ def preview_diario_moderno(fecha: date | str | None = None, *, destinatarios: li
         try:
             fecha = date.fromisoformat(fecha.strip())
         except Exception:
-            # try dayfirst
             ts = pd.to_datetime(fecha, dayfirst=True, errors="coerce")
             fecha = ts.date() if not pd.isna(ts) else (date.today() - timedelta(days=1))
     if fecha is None:
@@ -670,4 +766,3 @@ def preview_diario_moderno(fecha: date | str | None = None, *, destinatarios: li
 def dry_run_diario_moderno(fecha: date | None = None) -> dict[str, Any]:
     """Alias de preview para compat con dry-run endpoint futuro."""
     return preview_diario_moderno(fecha)
-
