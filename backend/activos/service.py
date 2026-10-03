@@ -64,6 +64,7 @@ def _row_to_item(row: pd.Series, *, fuera: bool) -> dict[str, Any]:
         "fecha_regreso": fmt_fecha(row.get("FECHA_REGRESO")),
         "estado_al_ingreso": _norm_text(row.get("ESTADO_AL_INGRESO", "")),
         "observaciones": _norm_text(row.get("OBSERVACIONES", "")),
+        "fingerprint": _norm_text(row.get("FINGERPRINT", "")),
     }
 
 

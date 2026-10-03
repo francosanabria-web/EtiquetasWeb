@@ -145,7 +145,7 @@ class ActivosStore:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, numero_pedido AS NUMERO_PEDIDO,
+SELECT id, numero_pedido AS NUMERO_PEDIDO,
                            numero_oc AS NUMERO_OC,
                            numero_remito AS NUMERO_REMITO,
                            sector AS SECTOR,
@@ -159,8 +159,9 @@ class ActivosStore:
                            estado_al_ingreso AS ESTADO_AL_INGRESO,
                            observaciones AS OBSERVACIONES,
                            dias_fuera AS DIAS_FUERA,
-                           estado AS ESTADO
-                    FROM salida_activos
+                           estado AS ESTADO,
+                           fingerprint AS FINGERPRINT
+                     FROM salida_activos
                     ORDER BY fecha_salida DESC, id DESC
                     """
                 )
@@ -183,10 +184,32 @@ class ActivosStore:
         df["_fuera"] = df["ESTADO"].astype(str).str.strip().str.lower() == "fuera_de_planta"
         # _sheet_row ahora es el id de DB para que write_ops use id real
         df["_sheet_row"] = pd.to_numeric(df["id"], errors="coerce").fillna(-1).astype(int)
-        # Asegurar DIAS_FUERA numerico
-        df["DIAS_FUERA"] = pd.to_numeric(df["DIAS_FUERA"], errors="coerce").fillna(0).astype(int)
+        # ── Días fuera: recalcular dinámicamente (no confiar en columna DB que queda congelada) ──
+        # Para fuera_de_planta: hoy - fecha_salida. Para ingresados: fecha_regreso - fecha_salida.
+        try:
+            from excel_io import calcular_dias_fuera  # lazy import para evitar ciclo
+
+            def _dias_row(r) -> int:
+                try:
+                    if bool(r.get("_fuera")):
+                        return int(calcular_dias_fuera(r.get("FECHA_SALIDA"), None))
+                    else:
+                        return int(calcular_dias_fuera(r.get("FECHA_SALIDA"), r.get("FECHA_REGRESO")))
+                except Exception:
+                    try:
+                        return int(float(r.get("DIAS_FUERA", 0) or 0))
+                    except Exception:
+                        return 0
+
+            df["DIAS_FUERA"] = df.apply(_dias_row, axis=1).astype(int)
+        except Exception:
+            # Fallback al valor almacenado si falla el recalculo
+            df["DIAS_FUERA"] = pd.to_numeric(df["DIAS_FUERA"], errors="coerce").fillna(0).astype(int)
         # SECTOR ya viene normalizado pero asegurar upper
         df["SECTOR"] = df["SECTOR"].astype(str).str.strip().str.upper().replace({"NAN": "", "NONE": ""})
+        # Asegurar FINGERPRINT
+        if "FINGERPRINT" in df.columns:
+            df["FINGERPRINT"] = df["FINGERPRINT"].astype(str).str.strip().str.upper().replace({"NAN": "", "NONE": ""})
         # FECHA_SALIDA / FECHA_REGRESO se mantienen como date/string, service usa fmt_fecha que maneja ambos
         self.df = df.reset_index(drop=True)
         self.archivo_ok = True

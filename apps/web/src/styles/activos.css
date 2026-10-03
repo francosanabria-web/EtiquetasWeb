@@ -508,10 +508,34 @@
 
 .act-cards-mobile {
   display: none;
+  margin: 0;
+  padding: 0;
+  gap: 10px;
+}
+
+.act-cards-mobile-list {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
+}
+
+.act-grupo-mobile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.act-grupo-mobile-header {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text);
+  background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
 }
 
 @media (max-width: 768px) {
@@ -744,4 +768,62 @@
   100% {
     background-position: -100% 0;
   }
+}
+
+/* ── Helpers para formularios dentro de modales ── */
+
+.sal-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.sal-grow {
+  flex: 1;
+}
+
+.btn-xs {
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  min-height: 28px;
+  border-radius: 6px;
+}
+
+/* Asegurar que inputs dentro de act-field tengan tamaño adecuado */
+.act-field input,
+.act-field textarea,
+.act-field select {
+  font-size: 0.88rem;
+  min-height: 36px;
+}
+
+/* ── Agrupación por remito — desktop table ── */
+.act-row-grupo td {
+  background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: var(--text);
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.act-grupo-remito {
+  font-weight: 800;
+}
+
+.act-grupo-count,
+.act-grupo-extra {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+[data-theme="dark"] .act-row-grupo td {
+  background: color-mix(in srgb, var(--primary) 16%, var(--surface));
+}
+
+/* ── Estado lectura-only para visualizar que el campo no se puede cambiar ── */
+.act-field-readonly {
+  opacity: 0.6;
+  pointer-events: none;
 }

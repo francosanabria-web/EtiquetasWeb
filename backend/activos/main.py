@@ -20,7 +20,7 @@ from exports import Vista, activos_excel, activos_pdf, nombre_archivo
 from service import activos_resumen
 from store import ActivosStore, CargandoDatosError, RedNoDisponibleError
 from excel_io import reescribir_formateado
-from write_ops import marcar_regreso, restablecer_fuera
+from write_ops import crear_salida, editar_activo, marcar_regreso, restablecer_fuera
 
 log = logging.getLogger("activos")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -181,6 +181,41 @@ async def post_restablecer_fuera(request: Request) -> JSONResponse:
     return await _run_json(work)
 
 
+async def post_crear_salida(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        return _err(ValueError("JSON inválido."), 400)
+    if not isinstance(body, dict):
+        return _err(ValueError("JSON inválido."), 400)
+
+    def work() -> dict:
+        return crear_salida(body)
+
+    return await _run_json(work, ok_status=201)
+
+
+async def put_editar_activo(request: Request) -> JSONResponse:
+    db_id = request.path_params.get("id")
+    if db_id is None:
+        return _err(ValueError("Falta id en la URL."), 400)
+    try:
+        db_id = int(db_id)
+    except (TypeError, ValueError):
+        return _err(ValueError("id debe ser un número entero."), 400)
+    try:
+        body = await request.json()
+    except Exception:
+        return _err(ValueError("JSON inválido."), 400)
+    if not isinstance(body, dict):
+        return _err(ValueError("JSON inválido."), 400)
+
+    def work() -> dict:
+        return editar_activo(db_id, body)
+
+    return await _run_json(work)
+
+
 async def post_reescribir_formato(_: Request) -> JSONResponse:
     """Reaplica formato de escritorio sin cambiar filas (útil tras un guardado plano)."""
     return await _run_json(reescribir_formateado)
@@ -204,6 +239,8 @@ routes = [
     Route("/api/activos/export.pdf", export_pdf, methods=["GET"]),
     Route("/api/activos/marcar-regreso", post_marcar_regreso, methods=["POST"]),
     Route("/api/activos/restablecer-fuera", post_restablecer_fuera, methods=["POST"]),
+    Route("/api/activos/salida", post_crear_salida, methods=["POST"]),
+    Route("/api/activos/{id}", put_editar_activo, methods=["PUT"]),
     Route("/api/activos/reescribir-formato", post_reescribir_formato, methods=["POST"]),
 ]
 

@@ -34,6 +34,40 @@ export type ActivoItem = {
   fecha_regreso?: string;
   estado_al_ingreso?: string;
   observaciones?: string;
+  fingerprint?: string;
+};
+
+export type CrearSalidaPayload = {
+  equipo: string;
+  sector: string;
+  proveedor: string;
+  numero_remito: string;
+  codigo?: string;
+  nro_serie?: string;
+  numero_pedido?: string;
+  numero_oc?: string;
+  cantidad?: number;
+  fecha_salida?: string;
+  observaciones?: string;
+};
+
+export type EditarActivoPayload = {
+  equipo?: string;
+  sector?: string;
+  proveedor?: string;
+  numero_remito?: string;
+  codigo?: string;
+  nro_serie?: string;
+  numero_pedido?: string;
+  numero_oc?: string;
+  cantidad?: number;
+  fecha_salida?: string;
+  observaciones?: string;
+};
+
+export type CrearSalidaResult = {
+  mensaje: string;
+  id: number;
 };
 
 export type MarcarRegresoResult = {
@@ -193,4 +227,35 @@ export function hoyIsoLocal(): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+export function crearSalida(
+  payload: CrearSalidaPayload,
+  token?: string,
+): Promise<CrearSalidaResult> {
+  return fetchJson<CrearSalidaResult>(
+    "/api/activos/salida",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+    token,
+  );
+}
+
+export function editarActivo(
+  id: number,
+  payload: EditarActivoPayload,
+  token?: string,
+): Promise<{ mensaje: string }> {
+  return fetchJson<{ mensaje: string }>(
+    `/api/activos/${id}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+    token,
+  );
 }

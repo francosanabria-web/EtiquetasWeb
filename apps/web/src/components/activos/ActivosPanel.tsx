@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import {
   claseBadgeDias,
   claseFilaDias,
@@ -13,8 +13,12 @@ import {
   restablecerFuera,
   urlActivosExcel,
   urlActivosPdf,
+  crearSalida,
+  editarActivo,
   type ActivoItem,
   type ActivosResumen,
+  type CrearSalidaPayload,
+  type EditarActivoPayload,
 } from "../../api/activosClient";
 import "../../styles/activos.css";
 
@@ -32,10 +36,42 @@ type Props = {
 
 function matchQuery(a: ActivoItem, q: string): boolean {
   if (!q) return true;
-  const hay = [a.equipo, a.observaciones, a.proveedor, a.sector, String(a.cantidad ?? ""), String(a.dias_fuera)]
+  const ql = q.toLowerCase();
+  const hay = [
+    a.equipo,
+    a.observaciones,
+    a.proveedor,
+    a.sector,
+    a.codigo,
+    a.remito,
+    a.n_pedido ?? "",
+    a.n_oc ?? "",
+    a.nro_serie ?? "",
+    a.fecha_salida ?? "",
+    a.fecha_regreso ?? "",
+    a.estado_al_ingreso ?? "",
+    String(a.cantidad ?? ""),
+    String(a.dias_fuera),
+  ]
     .join(" ")
     .toLowerCase();
-  return hay.includes(q);
+  return hay.includes(ql);
+}
+
+function agruparPorRemito(items: ActivoItem[]): Array<{ remito: string; items: ActivoItem[] }> {
+  const map = new Map<string, ActivoItem[]>();
+  for (const it of items) {
+    const key = (it.remito || "").trim() || "Sin remito";
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(it);
+  }
+  return Array.from(map.entries())
+    .sort((a, b) => {
+      if (a[0] === "Sin remito") return 1;
+      if (b[0] === "Sin remito") return -1;
+      return a[0].localeCompare(b[0], "es", { numeric: true, sensitivity: "base" });
+    })
+    .map(([remito, list]) => ({ remito, items: list }));
 }
 
 function Tabla({
@@ -45,6 +81,8 @@ function Tabla({
   onToggle,
   onToggleAll,
   puedeSeleccionar,
+  puedeEscribir,
+  onEditar,
 }: {
   items: ActivoItem[];
   vista: Vista;
@@ -52,6 +90,8 @@ function Tabla({
   onToggle: (id: string) => void;
   onToggleAll: (ids: string[], all: boolean) => void;
   puedeSeleccionar: boolean;
+  puedeEscribir?: boolean;
+  onEditar?: (a: ActivoItem) => void;
 }) {
   if (items.length === 0) {
     return (
@@ -82,91 +122,206 @@ function Tabla({
               ) : null}
               <th>Días fuera</th>
               <th>Equipo / repuesto</th>
-              <th>Cantidad</th>
+              <th>Cant.</th>
+              <th>Código</th>
+              <th>N° serie</th>
+              <th>Nº remito</th>
+              <th>Nº pedido</th>
+              <th>Nº OC</th>
+              <th>Fecha salida</th>
+              {vista === "ingresados" ? (
+                <>
+                  <th>Fecha regreso</th>
+                  <th>Estado ingreso</th>
+                </>
+              ) : null}
               <th>Observaciones</th>
               <th>Proveedor</th>
               <th>Sector</th>
+              {puedeEscribir ? <th style={{ width: 40 }} aria-label="Editar" /> : null}
             </tr>
           </thead>
           <tbody>
-            {items.map((a, i) => {
-              const checked = a.id ? seleccion.has(a.id) : false;
-              return (
-                <tr
-                  key={`${a.id || "x"}-${a.equipo}-${i}`}
-                  className={`${claseFilaDias(a.dias_fuera)}${checked ? " act-row-selected" : ""}`}
-                >
-                  {puedeSeleccionar ? (
-                    <td className="act-td-check">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={!a.id}
-                        onChange={() => a.id && onToggle(a.id)}
-                        aria-label={`Seleccionar ${a.equipo || a.dias_fuera}`}
-                      />
+            {(() => {
+              const grupos = agruparPorRemito(items);
+              const baseCols = vista === "ingresados" ? 14 : 12;
+              const colSpan = baseCols + (puedeSeleccionar ? 1 : 0) + (puedeEscribir ? 1 : 0);
+              return grupos.map((grupo) => (
+                <Fragment key={`g-${grupo.remito}`}>
+                  <tr className="act-row-grupo">
+                    <td colSpan={colSpan}>
+                      <span className="act-grupo-remito">Remito {grupo.remito}</span>
+                      <span className="act-grupo-count"> · {grupo.items.length} ítem(s)</span>
+                      {grupo.remito !== "Sin remito" && grupo.items[0]?.proveedor ? (
+                        <span className="act-grupo-extra"> · {grupo.items[0].proveedor}</span>
+                      ) : null}
                     </td>
-                  ) : null}
-                  <td>
-                    <span className={claseBadgeDias(a.dias_fuera)}>{a.dias_fuera}</span>
-                  </td>
-                  <td className="act-td-desc" title={a.equipo}>
-                    {a.equipo || "—"}
-                  </td>
-                  <td className="act-td-doc" style={{ textAlign: "center" }}>
-                    {a.cantidad ?? 1}
-                  </td>
-                  <td className="act-td-desc" title={a.observaciones} style={{ maxWidth: 220 }}>
-                    {a.observaciones || "—"}
-                  </td>
-                  <td className="act-td-prov" title={a.proveedor}>
-                    {a.proveedor || "—"}
-                  </td>
-                  <td>{etiquetaSector(a.sector) || "—"}</td>
-                </tr>
-              );
-            })}
+                  </tr>
+                  {grupo.items.map((a, i) => {
+                    const checked = a.id ? seleccion.has(a.id) : false;
+                    return (
+                      <tr
+                        key={`${a.id || "x"}-${a.equipo}-${grupo.remito}-${i}`}
+                        className={`${claseFilaDias(a.dias_fuera)}${checked ? " act-row-selected" : ""}`}
+                      >
+                        {puedeSeleccionar ? (
+                          <td className="act-td-check">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={!a.id}
+                              onChange={() => a.id && onToggle(a.id)}
+                              aria-label={`Seleccionar ${a.equipo || a.dias_fuera}`}
+                            />
+                          </td>
+                        ) : null}
+                        <td>
+                          <span className={claseBadgeDias(a.dias_fuera)}>{a.dias_fuera}</span>
+                        </td>
+                        <td className="act-td-desc" title={a.equipo}>
+                          {a.equipo || "—"}
+                        </td>
+                        <td className="act-td-doc" style={{ textAlign: "center" }}>
+                          {a.cantidad ?? 1}
+                        </td>
+                        <td className="act-td-doc" title={a.codigo}>
+                          {a.codigo || "—"}
+                        </td>
+                        <td className="act-td-doc" title={a.nro_serie}>
+                          {a.nro_serie || "—"}
+                        </td>
+                        <td className="act-td-doc" title={a.remito}>
+                          {a.remito || "—"}
+                        </td>
+                        <td className="act-td-doc" title={a.n_pedido}>
+                          {a.n_pedido || "—"}
+                        </td>
+                        <td className="act-td-doc" title={a.n_oc}>
+                          {a.n_oc || "—"}
+                        </td>
+                        <td className="act-td-doc" style={{ whiteSpace: "nowrap" }}>
+                          {a.fecha_salida || "—"}
+                        </td>
+                        {vista === "ingresados" ? (
+                          <>
+                            <td className="act-td-doc" style={{ whiteSpace: "nowrap" }}>
+                              {a.fecha_regreso || "—"}
+                            </td>
+                            <td className="act-td-desc" title={a.estado_al_ingreso} style={{ maxWidth: 120 }}>
+                              {a.estado_al_ingreso || "—"}
+                            </td>
+                          </>
+                        ) : null}
+                        <td className="act-td-desc" title={a.observaciones} style={{ maxWidth: 220 }}>
+                          {a.observaciones || "—"}
+                        </td>
+                        <td className="act-td-prov" title={a.proveedor}>
+                          {a.proveedor || "—"}
+                        </td>
+                        <td>{etiquetaSector(a.sector) || "—"}</td>
+                        {puedeEscribir && onEditar ? (
+                          <td className="act-td-check">
+                            <button
+                              type="button"
+                              className="btn-ghost btn-xs"
+                              title="Editar"
+                              onClick={() => onEditar(a)}
+                              aria-label={`Editar ${a.equipo}`}
+                            >
+                              ✏️
+                            </button>
+                          </td>
+                        ) : puedeEscribir ? (
+                          <td />
+                        ) : null}
+                      </tr>
+                    );
+                  })}
+                </Fragment>
+              ));
+            })()}
           </tbody>
         </table>
       </div>
 
-      <ul className="act-cards-mobile">
-        {items.map((a, i) => {
-          const checked = a.id ? seleccion.has(a.id) : false;
-          return (
-            <li
-              key={`m-${a.id || "x"}-${a.equipo}-${i}`}
-              className={`act-card-row ${claseFilaDias(a.dias_fuera)}${checked ? " act-row-selected" : ""}`}
-            >
-              <div className="act-card-row-top">
-                {puedeSeleccionar ? (
-                  <label className="act-card-check">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      disabled={!a.id}
-                      onChange={() => a.id && onToggle(a.id)}
-                      aria-label={`Seleccionar ${a.equipo || a.dias_fuera}`}
-                    />
-                  </label>
-                ) : null}
-                <div className="act-card-row-main">
-                  <strong className="act-card-row-title">{a.equipo || "Sin nombre"}</strong>
-                  <span className={claseBadgeDias(a.dias_fuera)}>{a.dias_fuera} días</span>
-                </div>
+      <div className="act-cards-mobile">
+        {(() => {
+          const grupos = agruparPorRemito(items);
+          return grupos.map((grupo) => (
+            <div key={`gm-${grupo.remito}`} className="act-grupo-mobile">
+              <div className="act-grupo-mobile-header">
+                <span className="act-grupo-remito">Remito {grupo.remito}</span>
+                <span className="act-grupo-count"> · {grupo.items.length} ítem(s)</span>
               </div>
-              <div className="act-card-row-meta">
-                <span>Cant. {a.cantidad ?? 1}</span>
-                <span>{etiquetaSector(a.sector) || "—"}</span>
-                <span>{a.proveedor || "Sin proveedor"}</span>
-              </div>
-              <div className="act-card-row-docs">
-                <span>{a.observaciones || "Sin observaciones"}</span>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+              <ul className="act-cards-mobile-list">
+                {grupo.items.map((a, i) => {
+                  const checked = a.id ? seleccion.has(a.id) : false;
+                  return (
+                    <li
+                      key={`m-${a.id || "x"}-${a.equipo}-${grupo.remito}-${i}`}
+                      className={`act-card-row ${claseFilaDias(a.dias_fuera)}${checked ? " act-row-selected" : ""}`}
+                    >
+                      <div className="act-card-row-top">
+                        {puedeSeleccionar ? (
+                          <label className="act-card-check">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={!a.id}
+                              onChange={() => a.id && onToggle(a.id)}
+                              aria-label={`Seleccionar ${a.equipo || a.dias_fuera}`}
+                            />
+                          </label>
+                        ) : null}
+                        <div className="act-card-row-main">
+                          <strong className="act-card-row-title">{a.equipo || "Sin nombre"}</strong>
+                          <span className={claseBadgeDias(a.dias_fuera)}>{a.dias_fuera} días</span>
+                        </div>
+                      </div>
+                      <div className="act-card-row-meta">
+                        <span>Cant. {a.cantidad ?? 1}</span>
+                        <span>{etiquetaSector(a.sector) || "—"}</span>
+                        <span>{a.proveedor || "Sin proveedor"}</span>
+                      </div>
+                      <div className="act-card-row-meta" style={{ marginTop: 4 }}>
+                        {a.codigo ? <span>Cód: {a.codigo}</span> : null}
+                        {a.nro_serie ? <span>Serie: {a.nro_serie}</span> : null}
+                        <span>Remito: {a.remito || "—"}</span>
+                        {a.n_pedido ? <span>Pedido: {a.n_pedido}</span> : null}
+                        {a.n_oc ? <span>OC: {a.n_oc}</span> : null}
+                      </div>
+                      <div className="act-card-row-meta" style={{ marginTop: 4 }}>
+                        <span>Salida: {a.fecha_salida || "—"}</span>
+                        {vista === "ingresados" ? (
+                          <>
+                            <span>Regreso: {a.fecha_regreso || "—"}</span>
+                            {a.estado_al_ingreso ? <span>Estado: {a.estado_al_ingreso}</span> : null}
+                          </>
+                        ) : null}
+                      </div>
+                      <div className="act-card-row-docs">
+                        <span>{a.observaciones || "Sin observaciones"}</span>
+                      </div>
+                      {puedeEscribir && onEditar ? (
+                        <button
+                          type="button"
+                          className="btn-ghost btn-xs"
+                          title="Editar"
+                          onClick={() => onEditar(a)}
+                          aria-label={`Editar ${a.equipo}`}
+                          style={{ marginTop: 4 }}
+                        >
+                          ✏️ Editar
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ));
+        })()}
+      </div>
     </>
   );
 }
@@ -259,6 +414,33 @@ export default function ActivosPanel({
   const [guardando, setGuardando] = useState(false);
   const [msgOk, setMsgOk] = useState<string | null>(null);
   const [msgErr, setMsgErr] = useState<string | null>(null);
+
+  // Modal crear salida
+  const [modalCrearAbierto, setModalCrearAbierto] = useState(false);
+  const [formCrear, setFormCrear] = useState<{
+    equipo: string;
+    sector: string;
+    proveedor: string;
+    numero_remito: string;
+    codigo: string;
+    nro_serie: string;
+    numero_pedido: string;
+    numero_oc: string;
+    cantidad: number;
+    fecha_salida: string;
+    observaciones: string;
+  }>({
+    equipo: "", sector: "", proveedor: "", numero_remito: "",
+    codigo: "", nro_serie: "", numero_pedido: "", numero_oc: "",
+    cantidad: 1, fecha_salida: hoyIsoLocal(), observaciones: "",
+  });
+  const [guardandoCrear, setGuardandoCrear] = useState(false);
+
+  // Modal editar activo
+  const [modalEditarAbierto, setModalEditarAbierto] = useState(false);
+  const [editarId, setEditarId] = useState<number | null>(null);
+  const [formEditar, setFormEditar] = useState<EditarActivoPayload>({});
+  const [guardandoEditar, setGuardandoEditar] = useState(false);
 
   const qNorm = q.trim().toLowerCase();
 
@@ -377,6 +559,126 @@ export default function ActivosPanel({
     }
   }
 
+  // ── Handlers para crear salida ──
+
+  function abrirModalCrear() {
+    if (!puedeEscribir) return;
+    setFormCrear({
+      equipo: "", sector: "", proveedor: "", numero_remito: "",
+      codigo: "", nro_serie: "", numero_pedido: "", numero_oc: "",
+      cantidad: 1, fecha_salida: hoyIsoLocal(), observaciones: "",
+    });
+    setMsgOk(null);
+    setMsgErr(null);
+    setModalCrearAbierto(true);
+  }
+
+  function cerrarModalCrear() {
+    setModalCrearAbierto(false);
+    setMsgErr(null);
+  }
+
+  function actualizarFormCrear(campo: string, valor: string | number) {
+    setFormCrear((prev) => ({ ...prev, [campo]: valor }));
+  }
+
+  async function handleCrearSalida() {
+    const { equipo, sector, proveedor, numero_remito } = formCrear;
+    if (!equipo.trim() || !sector.trim() || !proveedor.trim() || !numero_remito.trim()) {
+      setMsgErr("Completá los campos obligatorios: equipo, sector, proveedor y número de remito.");
+      return;
+    }
+    setGuardandoCrear(true);
+    setMsgErr(null);
+    try {
+      const payload: CrearSalidaPayload = {
+        equipo: equipo.trim(),
+        sector: sector.trim(),
+        proveedor: proveedor.trim(),
+        numero_remito: numero_remito.trim(),
+        codigo: formCrear.codigo.trim() || undefined,
+        nro_serie: formCrear.nro_serie.trim() || undefined,
+        numero_pedido: formCrear.numero_pedido.trim() || undefined,
+        numero_oc: formCrear.numero_oc.trim() || undefined,
+        cantidad: formCrear.cantidad,
+        fecha_salida: formCrear.fecha_salida,
+        observaciones: formCrear.observaciones.trim() || undefined,
+      };
+      const res = await crearSalida(payload, token ?? undefined);
+      setMsgOk(res.mensaje);
+      setModalCrearAbierto(false);
+      onRefreshed?.();
+    } catch (e) {
+      setMsgErr(e instanceof Error ? e.message : "No se pudo crear la salida.");
+    } finally {
+      setGuardandoCrear(false);
+    }
+  }
+
+  function validarFormCrear(): boolean {
+    const { equipo, sector, proveedor, numero_remito } = formCrear;
+    return !!(equipo.trim() && sector.trim() && proveedor.trim() && numero_remito.trim());
+  }
+
+  // ── Handlers para editar activo ──
+
+  function abrirModalEditar(a: ActivoItem) {
+    if (!puedeEscribir) return;
+    const idNum = a.id ? parseInt(a.id.replace(/^f-|^i-/, ""), 10) : null;
+    if (!idNum) return;
+    setEditarId(idNum);
+    setFormEditar({
+      equipo: a.equipo,
+      sector: a.sector,
+      proveedor: a.proveedor,
+      numero_remito: a.remito,
+      codigo: a.codigo,
+      nro_serie: a.nro_serie || "",
+      numero_pedido: a.n_pedido || "",
+      numero_oc: a.n_oc || "",
+      cantidad: a.cantidad,
+      fecha_salida: a.fecha_salida || "",
+      observaciones: a.observaciones || "",
+    });
+    setMsgOk(null);
+    setMsgErr(null);
+    setModalEditarAbierto(true);
+  }
+
+  function cerrarModalEditar() {
+    setModalEditarAbierto(false);
+    setEditarId(null);
+    setMsgErr(null);
+  }
+
+  function actualizarFormEditar(campo: string, valor: string | number | undefined) {
+    setFormEditar((prev) => ({ ...prev, [campo]: valor }));
+  }
+
+  async function handleEditarActivo() {
+    if (editarId === null) return;
+    setGuardandoEditar(true);
+    setMsgErr(null);
+    try {
+      const payload: EditarActivoPayload = { ...formEditar };
+      // Limpiar campos vacíos
+      for (const key of Object.keys(payload)) {
+        if (payload[key as keyof EditarActivoPayload] === "") {
+          delete payload[key as keyof EditarActivoPayload];
+        }
+      }
+      await editarActivo(editarId, payload, token ?? undefined);
+      setMsgOk("Actualizado correctamente.");
+      setModalEditarAbierto(false);
+      setEditarId(null);
+      onRefreshed?.();
+    } catch (e) {
+      setMsgErr(e instanceof Error ? e.message : "No se pudo actualizar el activo.");
+    } finally {
+      setGuardandoEditar(false);
+    }
+  }
+
   if (loading && !data) {
     return (
       <div className="act-page">
@@ -489,8 +791,17 @@ export default function ActivosPanel({
             </option>
           ))}
         </select>
-        <div className="act-toolbar-actions">
-          {puedeEscribir && vista === "fuera" ? (
+<div className="act-toolbar-actions">
+           {puedeEscribir && vista === "fuera" ? (
+             <button
+               type="button"
+               className="btn-primary btn-sm"
+               onClick={() => void abrirModalCrear()}
+             >
+               + Nueva salida
+             </button>
+           ) : null}
+           {puedeEscribir && vista === "fuera" ? (
             <button
               type="button"
               className="btn-primary btn-sm"
@@ -580,6 +891,8 @@ export default function ActivosPanel({
           onToggle={toggleId}
           onToggleAll={toggleAll}
           puedeSeleccionar={puedeSeleccionar}
+          puedeEscribir={puedeEscribir}
+          onEditar={puedeEscribir ? abrirModalEditar : undefined}
         />
       </section>
 
@@ -590,18 +903,31 @@ export default function ActivosPanel({
             <p className="act-card-hint">
               {seleccionadosItems.length} ítem(s) seleccionado(s). Se moverán a la hoja de ingresados.
             </p>
-            <ul className="act-modal-list">
-              {seleccionadosItems.slice(0, 8).map((a) => (
-                <li key={a.id}>
-                  {a.equipo || "(sin nombre)"}
-                  {a.codigo ? ` · ${a.codigo}` : ""}
-                  {a.remito ? ` · remito ${a.remito}` : ""}
-                </li>
-              ))}
-              {seleccionadosItems.length > 8 ? (
-                <li>… y {seleccionadosItems.length - 8} más</li>
+            <div className="act-modal-list" style={{ maxHeight: 180, overflow: "auto", margin: "8px 0 12px" }}>
+              {(() => {
+                const grupos = agruparPorRemito(seleccionadosItems);
+                return grupos.map((g) => (
+                  <div key={`modal-${g.remito}`} style={{ marginBottom: 6 }}>
+                    <strong style={{ fontSize: "0.8rem" }}>Remito {g.remito} · {g.items.length} ítem(s)</strong>
+                    <ul style={{ margin: "2px 0 0 14px", padding: 0, fontSize: "0.82rem" }}>
+                      {g.items.slice(0, 20).map((a) => (
+                        <li key={a.id}>
+                          {a.equipo || "(sin nombre)"}
+                          {a.codigo ? ` · ${a.codigo}` : ""}
+                          {a.cantidad && a.cantidad !== 1 ? ` · x${a.cantidad}` : ""}
+                        </li>
+                      ))}
+                      {g.items.length > 20 ? <li>… y {g.items.length - 20} más en este remito</li> : null}
+                    </ul>
+                  </div>
+                ));
+              })()}
+              {seleccionadosItems.length > 40 ? (
+                <p className="act-card-hint" style={{ marginTop: 6 }}>
+                  … y {seleccionadosItems.length - 40} más en total
+                </p>
               ) : null}
-            </ul>
+            </div>
             <label className="act-field">
               Fecha de ingreso a planta *
               <input
@@ -639,6 +965,283 @@ export default function ActivosPanel({
                 onClick={() => void confirmarRegreso()}
               >
                 {guardando ? "Guardando…" : "Confirmar ingreso"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── Modal Crear Salida ── */}
+      {modalCrearAbierto ? (
+        <div className="act-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="act-modal-crear">
+          <div className="act-modal">
+            <h3 id="act-modal-crear">Nueva salida de activo</h3>
+            <p className="act-card-hint">Campos marcados con * son obligatorios.</p>
+            {msgErr ? <p className="act-flash err">{msgErr}</p> : null}
+            {msgOk ? <p className="act-flash ok">{msgOk}</p> : null}
+            <label className="act-field">
+              Equipo / repuesto *
+              <input
+                type="text"
+                value={formCrear.equipo}
+                onChange={(e) => actualizarFormCrear("equipo", e.target.value)}
+                placeholder="Ej. MOTOR DIÉSEL MODEL X"
+                maxLength={200}
+              />
+            </label>
+            <label className="act-field">
+              Sector *
+              <input
+                type="text"
+                value={formCrear.sector}
+                onChange={(e) => actualizarFormCrear("sector", e.target.value)}
+                placeholder="Ej. MANTENIMIENTO"
+                maxLength={100}
+              />
+            </label>
+            <label className="act-field">
+              Proveedor *
+              <input
+                type="text"
+                value={formCrear.proveedor}
+                onChange={(e) => actualizarFormCrear("proveedor", e.target.value)}
+                placeholder="Ej. PARTES S.A."
+                maxLength={150}
+              />
+            </label>
+            <label className="act-field">
+              Nº remito *
+              <input
+                type="text"
+                value={formCrear.numero_remito}
+                onChange={(e) => actualizarFormCrear("numero_remito", e.target.value)}
+                placeholder="Ej. 12345-6"
+                maxLength={40}
+              />
+            </label>
+            <div className="sal-row">
+              <label className="act-field sal-grow">
+                Código
+                <input
+                  type="text"
+                  value={formCrear.codigo}
+                  onChange={(e) => actualizarFormCrear("codigo", e.target.value)}
+                  placeholder="Opcional"
+                  maxLength={40}
+                />
+              </label>
+              <label className="act-field sal-grow">
+                N° serie
+                <input
+                  type="text"
+                  value={formCrear.nro_serie}
+                  onChange={(e) => actualizarFormCrear("nro_serie", e.target.value)}
+                  placeholder="Opcional"
+                  maxLength={40}
+                />
+              </label>
+            </div>
+            <div className="sal-row">
+              <label className="act-field sal-grow">
+                Nº pedido
+                <input
+                  type="text"
+                  value={formCrear.numero_pedido}
+                  onChange={(e) => actualizarFormCrear("numero_pedido", e.target.value)}
+                  placeholder="Opcional"
+                  maxLength={40}
+                />
+              </label>
+              <label className="act-field sal-grow">
+                Nº OC
+                <input
+                  type="text"
+                  value={formCrear.numero_oc}
+                  onChange={(e) => actualizarFormCrear("numero_oc", e.target.value)}
+                  placeholder="Opcional"
+                  maxLength={40}
+                />
+              </label>
+            </div>
+            <div className="sal-row">
+              <label className="act-field">
+                Cantidad *
+                <input
+                  type="number"
+                  min={1}
+                  value={formCrear.cantidad}
+                  onChange={(e) => actualizarFormCrear("cantidad", parseInt(e.target.value) || 1)}
+                />
+              </label>
+              <label className="act-field">
+                Fecha salida *
+                <input
+                  type="date"
+                  value={formCrear.fecha_salida}
+                  onChange={(e) => actualizarFormCrear("fecha_salida", e.target.value)}
+                />
+              </label>
+            </div>
+            <label className="act-field">
+              Observaciones
+              <textarea
+                rows={3}
+                value={formCrear.observaciones}
+                onChange={(e) => actualizarFormCrear("observaciones", e.target.value)}
+                placeholder="Opcional"
+                maxLength={500}
+              />
+            </label>
+            <div className="act-modal-actions">
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                disabled={guardandoCrear}
+                onClick={() => cerrarModalCrear()}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn-primary btn-sm"
+                disabled={!validarFormCrear() || guardandoCrear}
+                onClick={() => void handleCrearSalida()}
+              >
+                {guardandoCrear ? "Creando…" : "Crear salida"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── Modal Editar Activo ── */}
+      {modalEditarAbierto && editarId !== null ? (
+        <div className="act-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="act-modal-editar">
+          <div className="act-modal">
+            <h3 id="act-modal-editar">Editar activo #{editarId}</h3>
+            <p className="act-card-hint">Podés cambiar cualquier dato. El estado y la fecha de regreso no se modifican por esta vía.</p>
+            {msgErr ? <p className="act-flash err">{msgErr}</p> : null}
+            {msgOk ? <p className="act-flash ok">{msgOk}</p> : null}
+            <label className="act-field">
+              Equipo *
+              <input
+                type="text"
+                value={formEditar.equipo ?? ""}
+                onChange={(e) => actualizarFormEditar("equipo", e.target.value)}
+                maxLength={200}
+              />
+            </label>
+            <label className="act-field">
+              Sector *
+              <input
+                type="text"
+                value={formEditar.sector ?? ""}
+                onChange={(e) => actualizarFormEditar("sector", e.target.value)}
+                maxLength={100}
+              />
+            </label>
+            <label className="act-field">
+              Proveedor *
+              <input
+                type="text"
+                value={formEditar.proveedor ?? ""}
+                onChange={(e) => actualizarFormEditar("proveedor", e.target.value)}
+                maxLength={150}
+              />
+            </label>
+            <label className="act-field">
+              Nº remito *
+              <input
+                type="text"
+                value={formEditar.numero_remito ?? ""}
+                onChange={(e) => actualizarFormEditar("numero_remito", e.target.value)}
+                maxLength={40}
+              />
+            </label>
+            <div className="sal-row">
+              <label className="act-field sal-grow">
+                Código
+                <input
+                  type="text"
+                  value={formEditar.codigo ?? ""}
+                  onChange={(e) => actualizarFormEditar("codigo", e.target.value)}
+                  maxLength={40}
+                />
+              </label>
+              <label className="act-field sal-grow">
+                N° serie
+                <input
+                  type="text"
+                  value={formEditar.nro_serie ?? ""}
+                  onChange={(e) => actualizarFormEditar("nro_serie", e.target.value)}
+                  maxLength={40}
+                />
+              </label>
+            </div>
+            <div className="sal-row">
+              <label className="act-field sal-grow">
+                Nº pedido
+                <input
+                  type="text"
+                  value={formEditar.numero_pedido ?? ""}
+                  onChange={(e) => actualizarFormEditar("numero_pedido", e.target.value)}
+                  maxLength={40}
+                />
+              </label>
+              <label className="act-field sal-grow">
+                Nº OC
+                <input
+                  type="text"
+                  value={formEditar.numero_oc ?? ""}
+                  onChange={(e) => actualizarFormEditar("numero_oc", e.target.value)}
+                  maxLength={40}
+                />
+              </label>
+            </div>
+            <div className="sal-row">
+              <label className="act-field">
+                Cantidad
+                <input
+                  type="number"
+                  min={1}
+                  value={formEditar.cantidad ?? 1}
+                  onChange={(e) => actualizarFormEditar("cantidad", parseInt(e.target.value) || 1)}
+                />
+              </label>
+              <label className="act-field">
+                Fecha salida
+                <input
+                  type="date"
+                  value={formEditar.fecha_salida ?? ""}
+                  onChange={(e) => actualizarFormEditar("fecha_salida", e.target.value)}
+                />
+              </label>
+            </div>
+            <label className="act-field">
+              Observaciones
+              <textarea
+                rows={3}
+                value={formEditar.observaciones ?? ""}
+                onChange={(e) => actualizarFormEditar("observaciones", e.target.value)}
+                maxLength={500}
+              />
+            </label>
+            <div className="act-modal-actions">
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                disabled={guardandoEditar}
+                onClick={() => cerrarModalEditar()}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn-primary btn-sm"
+                disabled={guardandoEditar}
+                onClick={() => void handleEditarActivo()}
+              >
+                {guardandoEditar ? "Guardando…" : "Guardar cambios"}
               </button>
             </div>
           </div>

@@ -866,6 +866,350 @@ button[type="submit"]:hover,
   color: var(--danger);
 }
 
+/* ——— Minuta: contadores y toggle vista tarjetas ——— */
+.minuta-contadores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 6px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.minuta-contadores .contador strong {
+  font-weight: 800;
+}
+.minuta-contadores .contador.total strong { color: var(--text); }
+.minuta-contadores .contador.critico { color: #dc2626; }
+.minuta-contadores .contador.urgente { color: #d97706; }
+.minuta-contadores .contador.normal { color: #0e7c66; }
+.minuta-contadores .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 2px;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+}
+.minuta-contadores .dot.critico { background: #dc2626; }
+.minuta-contadores .dot.urgente { background: #d97706; }
+.minuta-contadores .dot.normal { background: #0e7c66; }
+.minuta-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 0.9rem;
+  line-height: 1;
+  color: var(--muted);
+  cursor: grab;
+  user-select: none;
+  border-radius: 4px;
+  letter-spacing: 1px;
+}
+.minuta-drag-handle:hover {
+  background: var(--border);
+  color: var(--text);
+}
+.minuta-drag-handle:active {
+  cursor: grabbing;
+}
+.minuta-drag-handle.card {
+  width: 20px;
+  height: 20px;
+  font-size: 0.82rem;
+  background: transparent;
+  border: 1px solid transparent;
+}
+.minuta-drag-handle.card:hover {
+  background: #f1f5f9;
+  border-color: var(--border);
+}
+[data-theme="dark"] .minuta-drag-handle:hover {
+  background: #1e293b;
+}
+[data-theme="dark"] .minuta-contadores .dot.critico { background: #f87171; }
+[data-theme="dark"] .minuta-contadores .dot.urgente { background: #fbbf24; }
+[data-theme="dark"] .minuta-contadores .dot.normal { background: #34d399; }
+
+.minuta-vista-toggle {
+  display: inline-flex;
+  gap: 2px;
+  background: #f1f5f9;
+  border-radius: 999px;
+  padding: 2px;
+  border: 1px solid var(--border);
+}
+.minuta-vista-toggle button {
+  border: none;
+  background: transparent;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--muted);
+  transition: all 0.15s;
+}
+.minuta-vista-toggle button.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  border: 1px solid var(--border);
+}
+.minuta-vista-toggle button:hover:not(.active) {
+  color: var(--text);
+}
+
+.minuta-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 14px;
+}
+.minuta-pedido-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: box-shadow 0.15s, transform 0.15s, border-color 0.15s;
+  position: relative;
+  overflow: hidden;
+}
+.minuta-pedido-card:hover {
+  box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
+}
+.minuta-pedido-card.imp-critico { border-left: 4px solid #dc2626; }
+.minuta-pedido-card.imp-urgente { border-left: 4px solid #d97706; }
+.minuta-pedido-card.imp-normal { border-left: 4px solid #0e7c66; }
+.minuta-pedido-card.visto { opacity: 0.9; background: #f8fafc; }
+
+.minuta-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.minuta-card-head-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.minuta-importancia-badge,
+.minuta-estado-badge {
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.minuta-importancia-badge.imp-critico { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+.minuta-importancia-badge.imp-urgente { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
+.minuta-importancia-badge.imp-normal { background: #ecfdf5; color: #0e7c66; border: 1px solid #a7f3d0; }
+.minuta-estado-badge.est-en_proceso { background: #eff6ff; color: #1e40af; }
+.minuta-estado-badge.est-completado { background: #dcfce7; color: #166534; }
+.minuta-estado-badge.est-parcial { background: #fef3c7; color: #92400e; }
+.minuta-estado-badge.est-sin_oc { background: #f1f5f9; color: #475569; }
+.minuta-card-id {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.minuta-card-pedido {
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.minuta-card-npedido {
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.minuta-card-ultima {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.minuta-card-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.minuta-card-field span {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.minuta-card-field textarea {
+  min-height: 60px;
+}
+.minuta-card-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.minuta-card-historial {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.minuta-empty-cards {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 32px;
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+.minuta-cards-grouped {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.minuta-grupo-imp {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.minuta-grupo-titulo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+.minuta-grupo-badge {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.minuta-grupo-badge.imp-critico { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.minuta-grupo-badge.imp-urgente { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+.minuta-grupo-badge.imp-normal { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+.minuta-grupo-count {
+  background: var(--border);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+  min-width: 24px;
+  text-align: center;
+}
+
+.minuta-card-ultima-wrap {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  position: relative;
+}
+.minuta-card-ultima-wrap:hover {
+  background: #f1f5f9;
+  border-color: var(--primary);
+}
+.minuta-card-ultima-wrap .minuta-card-ultima {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  white-space: normal;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.minuta-card-ultima-wrap.expandida .minuta-card-ultima {
+  -webkit-line-clamp: unset;
+  white-space: normal;
+}
+.minuta-card-ultima-more {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--primary);
+}
+.minuta-card-ultima-wrap.expandida .minuta-card-ultima-more {
+  display: none;
+}
+
+/* Dark mode: tarjetas y grupos */
+[data-theme="dark"] .minuta-grupo-imp {
+  background: #1e293b;
+  border-color: #334155;
+}
+[data-theme="dark"] .minuta-grupo-badge.imp-critico { background: #3f1a1a; color: #fca5a5; border-color: #7f1d1d; }
+[data-theme="dark"] .minuta-grupo-badge.imp-urgente { background: #3d2e0f; color: #fcd34d; border-color: #92400e; }
+[data-theme="dark"] .minuta-grupo-badge.imp-normal { background: #0f2e26; color: #6ee7b7; border-color: #065f46; }
+[data-theme="dark"] .minuta-pedido-card {
+  background: #1e293b;
+  border-color: #334155;
+}
+[data-theme="dark"] .minuta-pedido-card:hover {
+  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+  border-color: #475569;
+}
+[data-theme="dark"] .minuta-card-ultima-wrap {
+  background: #0f172a;
+  border-color: #334155;
+}
+[data-theme="dark"] .minuta-card-ultima-wrap:hover {
+  background: #1e293b;
+  border-color: var(--primary);
+}
+[data-theme="dark"] .minuta-pedido-card.imp-critico { border-left-color: #f87171; }
+[data-theme="dark"] .minuta-pedido-card.imp-urgente { border-left-color: #fbbf24; }
+[data-theme="dark"] .minuta-pedido-card.imp-normal { border-left-color: #34d399; }
+[data-theme="dark"] .minuta-card-field textarea,
+[data-theme="dark"] .minuta-card-field input,
+[data-theme="dark"] .minuta-card-field select {
+  background: #0f172a;
+  border-color: #334155;
+  color: var(--text);
+}
+[data-theme="dark"] .minuta-vista-toggle {
+  background: #0f172a;
+  border-color: #334155;
+}
+[data-theme="dark"] .minuta-vista-toggle button.active {
+  background: #1e293b;
+  border-color: #475569;
+  color: var(--text);
+}
+
 .minuta-finalizados {
   margin: 12px 0 20px;
   border: 1px solid var(--border);

@@ -415,3 +415,39 @@ def fingerprint_row(row: pd.Series) -> str:
         norm_text(row.get("EQUIPO_REPUESTO", "")),
     ]
     return "|".join(parts)
+
+
+def calcular_fingerprint(
+    codigo: object,
+    numero_remito: object,
+    numero_pedido: object,
+    numero_oc: object,
+    nro_serie: object,
+    fecha_salida: object,
+    equipo: object,
+) -> str:
+    """Calcula fingerprint en formato UPPER/trim con fecha ISO YYYY-MM-DD.
+
+    Idéntico al bulk_load_activos.py _fingerprint() -> isoformat.
+    """
+    d = parse_fecha(fecha_salida)
+    iso = d.isoformat() if d else ""
+    parts = [
+        norm_doc(codigo),
+        norm_doc(numero_remito),
+        norm_doc(numero_pedido),
+        norm_doc(numero_oc),
+        norm_text(nro_serie),
+        iso,
+        norm_text(equipo),
+    ]
+    fp = "|".join(parts)
+    return fp.upper().strip()
+
+
+def parse_fecha_str_iso(val: object) -> str | None:
+    """Parsea fecha y devuelve YYYY-MM-DD o None."""
+    d = parse_fecha(val)
+    if d is None:
+        return None
+    return d.isoformat()
