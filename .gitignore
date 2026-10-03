@@ -43,6 +43,11 @@ preview_*.png
 # Logs del print-agent
 log_impresion_etiquetas.txt
 *.log
+*.log.err
+vite.log.err
+# Estado runtime (se genera solo; no se versiona)
+backend/reportes/.ultimo_mail_mensual.txt
+.ultimo_mail_mensual.txt
 
 # Logs y temporales de scripts / servicios
 scripts/logs/
