@@ -334,6 +334,69 @@ def escribir_alias(codigo: str, alias: str | None) -> bool:
         return False
 
 
+def sync_stock_bulk_to_firestore(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Push solo-artículos-cambiados DB -> Firestore (merge por doc).
+
+    - items: [{codigo, desc, stock, ubicacion, categoria, alias?}] ya filtrados por reglas de negocio.
+    - Cap interno 500 por llamada para ahorrar escrituras (el import no barre los 7000).
+    - Best-effort: intenta aunque FIREBASE_WRITE_ENABLED=0 (como alias); sin credenciales retorna pushed=0 con error.
+    - Un solo bump config/catalogo al final para que el buscador refresque una vez.
+    """
+    try:
+        lst = list(items or [])
+    except Exception:
+        return {"pushed": 0, "errors": 0, "skipped": 0, "error": "items inválidos"}
+    if not lst:
+        return {"pushed": 0, "errors": 0, "skipped": 0}
+    if len(lst) > 500:
+        lst = lst[:500]
+    try:
+        db = _get_db()
+    except FirebaseNoConfigurado as e:
+        return {"pushed": 0, "errors": 0, "skipped": len(lst), "error": str(e)}
+    except Exception as e:
+        return {"pushed": 0, "errors": len(lst), "skipped": 0, "error": str(e)}
+    pushed = 0
+    errors = 0
+    for it in lst:
+        try:
+            cod = str(it.get("codigo") or "").strip().upper()
+            if not cod:
+                continue
+            payload: dict[str, Any] = {
+                "codigo": cod,
+                "desc": str(it.get("desc") or it.get("descripcion") or ""),
+                "stock": float(it.get("stock") or 0),
+                "ubicacion": str(it.get("ubicacion") or ""),
+                "categoria": str(it.get("categoria") or "GENERAL") or "GENERAL",
+            }
+            alias_v = it.get("alias")
+            if alias_v is not None and str(alias_v).strip() != "":
+                payload["alias"] = str(alias_v).strip()
+            db.collection(COLECCION).document(cod).set(payload, merge=True)
+            pushed += 1
+        except Exception as e:
+            msg = str(e).lower()
+            if "429" in msg or "quota" in msg or "resource_exhausted" in msg or "exceeded" in msg:
+                log.warning("sync_stock_bulk quota en %s: %s", it.get("codigo"), e)
+                errors += 1
+                break
+            log.warning("sync_stock_bulk failed %s: %s", it.get("codigo"), e)
+            errors += 1
+    # Un solo bump de versión para que buscador/etiquetas refresquen
+    if pushed:
+        try:
+            from firebase_admin import firestore
+
+            db.collection("config").document("catalogo").set(
+                {"version": int(time.time()), "updatedAt": firestore.SERVER_TIMESTAMP},
+                merge=True,
+            )
+        except Exception:
+            pass
+    return {"pushed": pushed, "errors": errors, "skipped": 0, "total": len(lst)}
+
+
 def sync_alias_db_to_firestore(limit: int = 1000) -> dict[str, Any]:
     """Push all DB aliases to Firestore (DB -> Firestore). Limit protects large scans."""
     try:

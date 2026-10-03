@@ -23,6 +23,9 @@ export type ImportDetail = {
   stock_min_mod?: number;
   ubic_mod?: number;
   otros_mod?: number;
+  // Firestore buscador (solo cambiados, cap 500)
+  firestore_pushed?: number;
+  firestore_errors?: number;
 };
 
 export type ImportResult = {
@@ -31,6 +34,8 @@ export type ImportResult = {
   codigos_modificados: number;
   codigos_sin_precio: number;
   precios_propagados: number;
+  firestore_pushed?: number;
+  firestore_errors?: number;
   detalle: ImportDetail[];
 };
 

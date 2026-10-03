@@ -487,6 +487,8 @@ def _process_single_file(filename: str, content: bytes) -> dict[str, Any]:
     precios_map: dict[str, float] = {}
     # Audit rows pending until import_log_id is known (codigo, campo, antes, despues)
     pending_audits: list[tuple[str, str, str | None, str]] = []
+    # Códigos efectivamente cambiados (NEW + MOD) para push Firestore (solo cambiados, no barrer 7000)
+    changed_codigos: set[str] = set()
 
     conn = get_connection()
     # ensure autocommit False (get_connection already)
@@ -648,6 +650,7 @@ def _process_single_file(filename: str, content: bytes) -> dict[str, Any]:
                         )
                     codigos_nuevos += 1
                     reporte_lines.append(f"  + NEW {cod} ({tipo}): {', '.join(f'{k}={v}' for k,v in filtered.items())}")
+                    changed_codigos.add(cod)
                     # Audit NEW as creation (valor_antes NULL)
                     for _ak, _av in filtered.items():
                         if len(pending_audits) < 5000:
@@ -737,6 +740,7 @@ def _process_single_file(filename: str, content: bytes) -> dict[str, Any]:
                             if not any(k in updates for k in ("precio_unitario", "stock", "stock_minimo", "ubicacion")):
                                 otros_mod += 1
                         reporte_lines.append(f"  ~ MOD {cod}: {', '.join(f'{k} {existing.get(k)}->{v}' for k,v in updates.items())}")
+                        changed_codigos.add(cod)
                         # Collect audit rows per field for this modification
                         for _ak, _av in updates.items():
                             if len(pending_audits) < 5000:
@@ -762,6 +766,65 @@ def _process_single_file(filename: str, content: bytes) -> dict[str, Any]:
         # Actually count propagation successes
         # We'll keep precios_propagados as count of codes propagated with >0 rows
         # For simplicity return len(precios_map)
+
+        # Push Firestore solo-cambiados (best-effort, cap 500 para ahorrar escrituras)
+        firestore_pushed = 0
+        firestore_errors = 0
+        if changed_codigos:
+            try:
+                _capped = sorted(changed_codigos)[:500]
+                _fs_items: list[dict[str, Any]] = []
+                with conn.cursor() as _fc:
+                    for _cc in _capped:
+                        try:
+                            _fc.execute(
+                                "SELECT codigo, descripcion, stock, ubicacion, categoria, alias FROM maestro_stock WHERE codigo=%s LIMIT 1",
+                                (_cc,),
+                            )
+                            _fr = _fc.fetchone()
+                        except Exception:
+                            # Fallback sin alias si la columna aún no existe
+                            try:
+                                _fc.execute(
+                                    "SELECT codigo, descripcion, stock, ubicacion, categoria FROM maestro_stock WHERE codigo=%s LIMIT 1",
+                                    (_cc,),
+                                )
+                                _fr = _fc.fetchone()
+                                if _fr is not None:
+                                    _fr["alias"] = None
+                            except Exception:
+                                continue
+                        if not _fr:
+                            continue
+                        _fs_items.append(
+                            {
+                                "codigo": str(_fr.get("codigo") or _cc).strip().upper(),
+                                "desc": str(_fr.get("descripcion") or ""),
+                                "stock": float(_fr.get("stock") or 0),
+                                "ubicacion": str(_fr.get("ubicacion") or ""),
+                                "categoria": str(_fr.get("categoria") or "GENERAL") or "GENERAL",
+                                "alias": _fr.get("alias"),
+                            }
+                        )
+                if _fs_items:
+                    try:
+                        import firebase_sync as _fb
+
+                        _fs_res = _fb.sync_stock_bulk_to_firestore(_fs_items)
+                        firestore_pushed = int(_fs_res.get("pushed") or 0)
+                        firestore_errors = int(_fs_res.get("errors") or 0)
+                        if _fs_res.get("error"):
+                            reporte_lines.append(f"  >> FIRESTORE: {firestore_pushed} pusheados, {firestore_errors} errores ({len(_fs_items)} cambiados) — {_fs_res.get('error')}")
+                        else:
+                            reporte_lines.append(f"  >> FIRESTORE: {firestore_pushed} artículos sincronizados al buscador ({len(_fs_items)} cambiados)")
+                    except Exception as _fe:
+                        log.warning("Firestore bulk push failed for %s: %s", filename, _fe)
+                        reporte_lines.append(f"  >> FIRESTORE: omitido ({len(_fs_items)} cambiados) — {str(_fe)[:120]}")
+                        firestore_errors = len(_fs_items)
+                if len(changed_codigos) > 500:
+                    reporte_lines.append(f"  >> FIRESTORE: cap 500 de {len(changed_codigos)} cambiados (resto en próximo import)")
+            except Exception as _fe2:
+                log.warning("Firestore changed-codes collect failed for %s: %s", filename, _fe2)
 
         # Compute sin_precio global excluding K/U (artículos sin precio por diseño)
         with conn.cursor() as cur:
@@ -859,6 +922,8 @@ def _process_single_file(filename: str, content: bytes) -> dict[str, Any]:
             "otros_mod": otros_mod,
             "precios_propagados": precios_propagados,
             "propagated_rows": prop_total,
+            "firestore_pushed": firestore_pushed,
+            "firestore_errors": firestore_errors,
             "duracion_ms": duracion_ms,
             "reporte": reporte,
         }
@@ -953,6 +1018,8 @@ async def post_import(request: Request) -> JSONResponse:
     total_mod = sum(r["codigos_modificados"] for r in results)
     total_sin_precio = results[-1]["codigos_sin_precio"] if results else 0
     total_propagados = sum(r.get("precios_propagados", 0) for r in results)
+    total_firestore = sum(r.get("firestore_pushed", 0) for r in results)
+    total_firestore_err = sum(r.get("firestore_errors", 0) for r in results)
 
     return JSONResponse(
         {
@@ -961,6 +1028,8 @@ async def post_import(request: Request) -> JSONResponse:
             "codigos_modificados": total_mod,
             "codigos_sin_precio": total_sin_precio,
             "precios_propagados": total_propagados,
+            "firestore_pushed": total_firestore,
+            "firestore_errors": total_firestore_err,
             "detalle": results,
         },
         status_code=200,

@@ -676,7 +676,8 @@ export default function ActualizacionPage() {
               </details>
             ) : null}
             <p className="sub" style={{ margin: 0, fontSize: "0.78rem" }}>
-              API: /api/maestro-stock/import · archivos: {displayResult.archivos} — el detalle estructurado con filtros está en “Último import persistido” y en el historial.
+              API: /api/maestro-stock/import · archivos: {displayResult.archivos} · Firestore buscador: {displayResult.firestore_pushed ?? displayResult.detalle.reduce((a, d) => a + (d.firestore_pushed ?? 0), 0)} sincronizados
+              {(displayResult.firestore_errors ?? displayResult.detalle.reduce((a, d) => a + (d.firestore_errors ?? 0), 0)) > 0 ? ` (${displayResult.firestore_errors ?? displayResult.detalle.reduce((a, d) => a + (d.firestore_errors ?? 0), 0)} errores — ver reporte)` : " — el detalle estructurado con filtros está en “Último import persistido” y en el historial."}
             </p>
           </div>
         )}

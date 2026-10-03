@@ -72,5 +72,32 @@ class TestAuditContract(unittest.TestCase):
         self.assertTrue(hasattr(ms, "post_import"))
 
 
+class TestFirestoreBulk(unittest.TestCase):
+    def test_bulk_empty(self):
+        import firebase_sync as fb
+
+        self.assertEqual(fb.sync_stock_bulk_to_firestore([])["pushed"], 0)
+
+    def test_bulk_caps_at_500(self):
+        import firebase_sync as fb
+        from unittest.mock import MagicMock, patch
+
+        items = [{"codigo": f"M{i:04d}", "desc": "X", "stock": 1, "ubicacion": "", "categoria": "GENERAL"} for i in range(600)]
+        fake_db = MagicMock()
+        with patch.object(fb, "_get_db", return_value=fake_db):
+            res = fb.sync_stock_bulk_to_firestore(items)
+        self.assertEqual(res["total"], 500)
+        self.assertEqual(fake_db.collection.return_value.document.return_value.set.call_count, 500)
+
+    def test_bulk_no_credentials(self):
+        import firebase_sync as fb
+        from unittest.mock import patch
+
+        with patch.object(fb, "_get_db", side_effect=fb.FirebaseNoConfigurado("sin cred")):
+            res = fb.sync_stock_bulk_to_firestore([{"codigo": "M1", "desc": "", "stock": 0, "ubicacion": "", "categoria": "GENERAL"}])
+        self.assertEqual(res["pushed"], 0)
+        self.assertIn("error", res)
+
+
 if __name__ == "__main__":
     unittest.main()
