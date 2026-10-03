@@ -77,11 +77,40 @@ CREATE TABLE IF NOT EXISTS `maestro_stock_import_log` (
   `codigos_sin_precio` INT NOT NULL DEFAULT 0 COMMENT 'Snapshot global sin precio (>0) tras import',
   `duracion_ms` INT NOT NULL DEFAULT 0 COMMENT 'Duracion procesamiento archivo en ms',
   `reporte` TEXT COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Detalle reporte texto (lineas modificados/nuevos/propagados)',
+  `precios_modificados` INT NOT NULL DEFAULT 0 COMMENT 'Cantidad codigos con precio modificado (v2)',
+  `stock_altas` INT NOT NULL DEFAULT 0 COMMENT 'Altas de stock (v2)',
+  `stock_bajas` INT NOT NULL DEFAULT 0 COMMENT 'Bajas de stock (v2)',
+  `stock_min_mod` INT NOT NULL DEFAULT 0 COMMENT 'Modificaciones stock minimo (v2)',
+  `ubic_mod` INT NOT NULL DEFAULT 0 COMMENT 'Modificaciones ubicacion (v2)',
+  `otros_mod` INT NOT NULL DEFAULT 0 COMMENT 'Otros campos (v2)',
+  `precios_propagados` INT NOT NULL DEFAULT 0 COMMENT 'Codigos con precio propagado (v2)',
+  `propagated_rows` INT NOT NULL DEFAULT 0 COMMENT 'Movimientos propagados mes curso (v2)',
   `creado_en` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'timestamp import',
   PRIMARY KEY (`id`),
   KEY `idx_import_log_tipo` (`tipo_archivo`),
   KEY `idx_import_log_creado` (`creado_en`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Log auditoria importaciones maestro_stock por archivo';
+
+-- -----------------------------------------------------------
+-- maestro_stock_audit: per-field trail (v2 - opcion B)
+-- One row per campo cambiado per codigo per file, linked to import_log
+-- Allows GET /api/maestro-stock/{codigo}/history and /import-log/{id}/diff
+-- -----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `maestro_stock_audit` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `codigo` VARCHAR(40) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Codigo articulo',
+  `campo` VARCHAR(40) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Campo modificado (descripcion, stock, stock_minimo, ubicacion, precio_unitario, importancia, categoria)',
+  `valor_antes` TEXT COLLATE utf8mb4_unicode_ci NULL COMMENT 'Valor anterior (NULL para NEW)',
+  `valor_despues` TEXT COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Valor nuevo',
+  `archivo_origen` VARCHAR(255) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Archivo origen del cambio',
+  `tipo_archivo` ENUM('detallado','valorizado','general') COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Tipo archivo segun nombre',
+  `import_log_id` INT UNSIGNED NOT NULL COMMENT 'FK a maestro_stock_import_log.id',
+  `creado_en` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'timestamp audit',
+  PRIMARY KEY (`id`),
+  KEY `idx_audit_codigo` (`codigo`),
+  KEY `idx_audit_import` (`import_log_id`),
+  KEY `idx_audit_creado` (`creado_en`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Audit trail por campo para maestro_stock (v2)';
 
 -- ===========================================================
 -- SEEDS / EJEMPLOS (idempotentes)

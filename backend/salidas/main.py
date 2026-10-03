@@ -22,7 +22,10 @@ from firebase_sync import iniciar_alias_sync_background, iniciar_sync_background
 # Maestro stock - imported lazily to avoid circular issues if DB not ready
 try:
     from routes.maestro_stock import (
+        get_codigo_history as maestro_codigo_history,
+        get_import_diff as maestro_import_diff,
         get_import_log as maestro_import_log,
+        get_import_log_by_id as maestro_import_log_by_id,
         get_list as maestro_list,
         get_stats as maestro_stats,
         post_import as maestro_import,
@@ -33,7 +36,10 @@ except ImportError:
     # Fallback when routes package not found (e.g., flat file)
     try:
         from maestro_stock_routes import (  # type: ignore
+            get_codigo_history as maestro_codigo_history,  # type: ignore
+            get_import_diff as maestro_import_diff,  # type: ignore
             get_import_log as maestro_import_log,
+            get_import_log_by_id as maestro_import_log_by_id,
             get_list as maestro_list,
             get_stats as maestro_stats,
             post_import as maestro_import,
@@ -41,7 +47,10 @@ except ImportError:
             put_alias as maestro_put_alias,
         )
     except ImportError:
-        maestro_import = maestro_list = maestro_import_log = maestro_stats = maestro_sync_alias = maestro_put_alias = None  # type: ignore
+        maestro_import = maestro_list = maestro_import_log = maestro_import_log_by_id = maestro_stats = maestro_sync_alias = maestro_put_alias = maestro_import_diff = maestro_codigo_history = None  # type: ignore
+        # Ensure names exist for route wiring
+        maestro_import_diff = None  # type: ignore
+        maestro_codigo_history = None  # type: ignore
 from service import (
     actualizar_motivo,
     anular_movimiento,
@@ -65,6 +74,7 @@ from service import (
     proyectar_stock,
     refresh_maestro,
     registrar_atencion,
+    resumen_diario,
     sync_firebase_ahora,
 )
 from store import CargandoDatosError, RedNoDisponibleError, SalidasStore
@@ -218,8 +228,8 @@ async def put_movimiento(request: Request) -> JSONResponse:
         return _err(ValueError("JSON invalido."), 400)
     # Extraer motivo opcional (para auditoria)
     motivo = body.get("motivo") or body.get("motivo_edicion") or None
-    # Filtrar campos permitidos
-    permitidos = ("tipo_comprobante", "numero_orden", "maquina_sitio", "sector_nombre", "operario_nombre", "cantidad", "precio_unitario")
+    # Filtrar campos permitidos (fecha solo admin - es admin-only porque este endpoint ya exige admin)
+    permitidos = ("tipo_comprobante", "numero_orden", "maquina_sitio", "sector_nombre", "operario_nombre", "cantidad", "precio_unitario", "fecha")
     cambios: dict = {}
     for k in permitidos:
         if k in body:
@@ -234,7 +244,7 @@ async def put_movimiento(request: Request) -> JSONResponse:
                     cambios[k] = vv
                     break
     if not cambios:
-        return _err(ValueError("No hay campos editables (permitidos: tipo_comprobante, numero_orden, maquina_sitio, sector_nombre, operario_nombre, cantidad, precio_unitario)."), 400)
+        return _err(ValueError("No hay campos editables (permitidos: tipo_comprobante, numero_orden, maquina_sitio, sector_nombre, operario_nombre, cantidad, precio_unitario, fecha)."), 400)
     realizado_por = str((payload or {}).get("usuario") or (payload or {}).get("sub") or "SISTEMA")
 
     def work() -> dict:
@@ -501,6 +511,24 @@ async def delete_motivo(request: Request) -> JSONResponse:
     return await _run_json(work)
 
 
+async def get_resumen_diario(request: Request) -> JSONResponse:
+    """Retorna resumen diario agrupado por tipo comprobante (PAÑOL, L1-L7, OTROS)."""
+    q = request.query_params
+    tok = _token(request)
+    if tok and not verificar_permiso(tok, "salidas:lectura"):
+        return JSONResponse({"detail": "Sin permiso de lectura en salidas."}, status_code=403)
+    fecha = (q.get("fecha") or "").strip()
+    if not fecha:
+        return JSONResponse({"detail": "fecha es obligatoria (AAAA-MM-DD)."}, status_code=400)
+    incluir_raw = q.get("incluir_anulados") or "0"
+    incluir_anulados = str(incluir_raw).strip().lower() not in ("0", "false", "no", "off", "")
+
+    def work() -> dict:
+        return resumen_diario(fecha, incluir_anulados=incluir_anulados)
+
+    return await _run_json(work)
+
+
 async def get_diario_export(request: Request) -> Response:
     """Export on-demand diario sin persistir archivo - fuente unica salida_historial (soporta DB)."""
     q = request.query_params
@@ -574,19 +602,27 @@ routes = [
     Route("/api/salidas/atenciones/export", get_atenciones_export, methods=["GET"]),
     Route("/api/salidas/atenciones/kpi", get_atenciones_kpi, methods=["GET"]),
     Route("/api/salidas/diario/export", get_diario_export, methods=["GET"]),
+    Route("/api/salidas/resumen-diario", get_resumen_diario, methods=["GET"]),
     Route("/api/salidas/remito/export", get_remito_export, methods=["GET"]),
     Route("/api/salidas/refresh", post_refresh, methods=["POST"]),
     Route("/api/salidas/sync-firebase", post_sync_firebase, methods=["POST"]),
 ]
 
-# Maestro stock routes (if available) - alias bidirectional sync
+# Maestro stock routes (if available) - alias bidirectional sync + audit history
 if maestro_import is not None:
     _maestro_routes = [
         Route("/api/maestro-stock/import", maestro_import, methods=["POST"]),
         Route("/api/maestro-stock", maestro_list, methods=["GET"]),
         Route("/api/maestro-stock/import-log", maestro_import_log, methods=["GET"]),
+        # diff must be before {id} generic to avoid capture, and before {codigo}/history
+        Route("/api/maestro-stock/import-log/{id}/diff", maestro_import_diff, methods=["GET"]) if maestro_import_diff else None,
+        Route("/api/maestro-stock/import-log/{id}", maestro_import_log_by_id, methods=["GET"]),
         Route("/api/maestro-stock/stats", maestro_stats, methods=["GET"]),
     ]
+    # Filter None if import_diff not available (older import)
+    _maestro_routes = [r for r in _maestro_routes if r is not None]
+    if maestro_codigo_history is not None:
+        _maestro_routes.append(Route("/api/maestro-stock/{codigo}/history", maestro_codigo_history, methods=["GET"]))
     if maestro_put_alias is not None:
         _maestro_routes.append(Route("/api/maestro-stock/{codigo}/alias", maestro_put_alias, methods=["PUT"]))
         # Alias via generic PUT with body {codigo, alias} for clients without path param

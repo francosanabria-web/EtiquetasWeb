@@ -16,6 +16,13 @@ export type ImportDetail = {
   duracion_ms?: number;
   reporte?: string;
   propagated_rows?: number;
+  // Desglose distinguido (v2)
+  precios_modificados?: number;
+  stock_altas?: number;
+  stock_bajas?: number;
+  stock_min_mod?: number;
+  ubic_mod?: number;
+  otros_mod?: number;
 };
 
 export type ImportResult = {
@@ -37,11 +44,22 @@ export type ImportLog = {
   duracion_ms: number;
   creado_en: string;
   reporte?: string | null;
+  // Campos nuevos para reporte distinguido (pueden no venir en logs viejos)
+  precios_modificados?: number;
+  stock_altas?: number;
+  stock_bajas?: number;
+  stock_min_mod?: number;
+  ubic_mod?: number;
+  otros_mod?: number;
+  precios_propagados?: number;
+  propagated_rows?: number;
 };
 
 export type MaestroStats = {
   total: number;
   sin_precio: number;
+  sin_precio_total?: number;
+  sin_precio_ku_excluidos?: number;
   criticos: number;
   por_importancia: Record<string, number>;
 };
@@ -171,6 +189,66 @@ export async function importMaestroStock(files: File[], token?: string): Promise
 
 export function getImportLog(token?: string): Promise<{ items: ImportLog[] }> {
   return fetchJson<{ items: ImportLog[] }>("/api/maestro-stock/import-log", {}, token);
+}
+
+export function getImportLogById(id: number, token?: string): Promise<ImportLog> {
+  return fetchJson<ImportLog>(`/api/maestro-stock/import-log/${id}`, {}, token);
+}
+
+export type ImportDiffRow = {
+  id?: number;
+  codigo: string;
+  campo: string;
+  valor_antes: string | null;
+  valor_despues: string;
+  archivo_origen: string;
+  tipo_archivo: string;
+  import_log_id: number;
+  creado_en: string | null;
+};
+
+export type ImportDiffResult = {
+  import_log_id: number;
+  archivo_origen: string;
+  tipo_archivo: string;
+  creado_en: string | null;
+  items: ImportDiffRow[];
+};
+
+export type CodigoHistoryResult = {
+  codigo: string;
+  total: number;
+  page: number;
+  limit: number;
+  items: ImportDiffRow[];
+};
+
+export function getImportDiff(id: number, token?: string): Promise<ImportDiffResult> {
+  return fetchJson<ImportDiffResult>(`/api/maestro-stock/import-log/${id}/diff`, {}, token);
+}
+
+export function getCodigoHistory(codigo: string, params?: { page?: number; limit?: number }, token?: string): Promise<CodigoHistoryResult> {
+  const sp = new URLSearchParams();
+  if (params?.page) sp.set("page", String(params.page));
+  if (params?.limit) sp.set("limit", String(params.limit));
+  const qs = sp.toString();
+  return fetchJson<CodigoHistoryResult>(`/api/maestro-stock/${encodeURIComponent(codigo)}/history${qs ? `?${qs}` : ""}`, {}, token);
+}
+
+export function diffRowsToCsv(rows: ImportDiffRow[]): string {
+  const header = "codigo,campo,antes,despues,archivo,tipo,import_log_id,creado_en";
+  const esc = (s: string | null | undefined) => {
+    if (s == null) return "";
+    const str = String(s);
+    if (str.includes(",") || str.includes('"') || str.includes("\n")) return '"' + str.replace(/"/g, '""') + '"';
+    return str;
+  };
+  const lines = rows.map((r) => [esc(r.codigo), esc(r.campo), esc(r.valor_antes), esc(r.valor_despues), esc(r.archivo_origen), esc(r.tipo_archivo), String(r.import_log_id), esc(r.creado_en)].join(","));
+  return [header, ...lines].join("\n");
+}
+
+export function diffRowsToTsv(rows: ImportDiffRow[]): string {
+  return rows.map((r) => [r.codigo, r.campo, r.valor_antes ?? "", r.valor_despues, r.archivo_origen, r.tipo_archivo].join("\t")).join("\n");
 }
 
 export function getMaestroStats(token?: string): Promise<MaestroStats> {

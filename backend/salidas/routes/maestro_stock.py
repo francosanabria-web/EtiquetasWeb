@@ -104,13 +104,13 @@ def _parse_decimal(val: Any) -> float | None:
         else:
             s = s.replace(",", "")
     try:
-        return float(s)
+        return round(float(s), 2)
     except ValueError:
         try:
             v = pd.to_numeric(s, errors="coerce")
             if pd.isna(v):
                 return None
-            return float(v)
+            return round(float(v), 2)
         except Exception:
             return None
 
@@ -341,7 +341,6 @@ def _ensure_tables(conn) -> None:
               `archivo_origen` VARCHAR(255) COLLATE utf8mb4_unicode_ci NOT NULL,
               `tipo_archivo` ENUM('detallado','valorizado','general') COLLATE utf8mb4_unicode_ci NOT NULL,
               `codigos_nuevos` INT NOT NULL DEFAULT 0,
-              `codigos_modificados` INT NOT NULL DEFAULT 0,
               `codigos_sin_precio` INT NOT NULL DEFAULT 0,
               `duracion_ms` INT NOT NULL DEFAULT 0,
               `reporte` TEXT COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -352,6 +351,80 @@ def _ensure_tables(conn) -> None:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
         )
+        # --- compat: ensure codigos_modificados exists (older installs) ---
+        try:
+            cur.execute(
+                "SELECT COUNT(*) AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='maestro_stock_import_log' AND COLUMN_NAME='codigos_modificados'"
+            )
+            _r2 = cur.fetchone()
+            if _r2 and int(_r2.get("c", 0)) == 0:
+                try:
+                    cur.execute("ALTER TABLE `maestro_stock_import_log` ADD COLUMN `codigos_modificados` INT NOT NULL DEFAULT 0 AFTER `codigos_nuevos`")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # --- enriched counters for diff/persisted history (B) ---
+        for _col in ("precios_modificados", "stock_altas", "stock_bajas", "stock_min_mod", "ubic_mod", "otros_mod", "precios_propagados", "propagated_rows"):
+            try:
+                cur.execute(
+                    "SELECT COUNT(*) AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='maestro_stock_import_log' AND COLUMN_NAME=%s",
+                    (_col,),
+                )
+                _rc = cur.fetchone()
+                if _rc and int(_rc.get("c", 0)) == 0:
+                    try:
+                        cur.execute(f"ALTER TABLE `maestro_stock_import_log` ADD COLUMN `{_col}` INT NOT NULL DEFAULT 0")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        # --- audit trail table (per-field history) ---
+        try:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS `maestro_stock_audit` (
+                  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                  `codigo` VARCHAR(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+                  `campo` VARCHAR(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+                  `valor_antes` TEXT COLLATE utf8mb4_unicode_ci NULL,
+                  `valor_despues` TEXT COLLATE utf8mb4_unicode_ci NOT NULL,
+                  `archivo_origen` VARCHAR(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+                  `tipo_archivo` ENUM('detallado','valorizado','general') COLLATE utf8mb4_unicode_ci NOT NULL,
+                  `import_log_id` INT UNSIGNED NOT NULL,
+                  `creado_en` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  PRIMARY KEY (`id`),
+                  KEY `idx_audit_codigo` (`codigo`),
+                  KEY `idx_audit_import` (`import_log_id`),
+                  KEY `idx_audit_creado` (`creado_en`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+        except Exception as _e:
+            # Fallback without FK if the CREATE failed due to engine quirks
+            try:
+                log.warning("maestro_stock_audit CREATE fallback: %s", _e)
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS `maestro_stock_audit` (
+                      `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                      `codigo` VARCHAR(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+                      `campo` VARCHAR(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+                      `valor_antes` TEXT COLLATE utf8mb4_unicode_ci NULL,
+                      `valor_despues` TEXT COLLATE utf8mb4_unicode_ci NULL,
+                      `archivo_origen` VARCHAR(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+                      `tipo_archivo` VARCHAR(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+                      `import_log_id` INT UNSIGNED NOT NULL,
+                      `creado_en` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                      PRIMARY KEY (`id`),
+                      KEY `idx_audit_codigo` (`codigo`),
+                      KEY `idx_audit_import` (`import_log_id`),
+                      KEY `idx_audit_creado` (`creado_en`)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """
+                )
+            except Exception:
+                pass
     conn.commit()
 
 def _propagar_precio(conn, codigo: str, precio: float) -> int:
@@ -404,8 +477,16 @@ def _process_single_file(filename: str, content: bytes) -> dict[str, Any]:
     reporte_lines.append(f"File: {filename} ({tipo})")
     codigos_nuevos = 0
     codigos_modificados = 0
+    precios_modificados = 0
+    stock_altas = 0
+    stock_bajas = 0
+    stock_min_mod = 0
+    ubic_mod = 0
+    otros_mod = 0
     precios_propagados = 0
     precios_map: dict[str, float] = {}
+    # Audit rows pending until import_log_id is known (codigo, campo, antes, despues)
+    pending_audits: list[tuple[str, str, str | None, str]] = []
 
     conn = get_connection()
     # ensure autocommit False (get_connection already)
@@ -525,6 +606,26 @@ def _process_single_file(filename: str, content: bytes) -> dict[str, Any]:
                     cur.execute("SELECT * FROM maestro_stock WHERE codigo=%s", (cod,))
                     existing = cur.fetchone()
 
+                # Guard EL vs ELE: detectar M1622EL cuando ya existe M1622ELE misma descripción (typo truncado)
+                if cod.endswith("EL") and not cod.endswith("ELE"):
+                    _ele = cod + "E"
+                    try:
+                        with conn.cursor() as _ck:
+                            _ck.execute("SELECT codigo, descripcion FROM maestro_stock WHERE codigo=%s", (_ele,))
+                            _row_ele = _ck.fetchone()
+                            if _row_ele:
+                                _desc_new = (filtered.get("descripcion") or (existing.get("descripcion") if existing else "") or "")
+                                _desc_ele = str(_row_ele.get("descripcion") or "")
+                                if _desc_new and _desc_ele and _desc_new.strip().upper() == _desc_ele.strip().upper():
+                                    reporte_lines.append(
+                                        f"  ! WARN {cod} -> posible duplicado truncado de {_ele} (EL vs ELE) misma descr '{_desc_new[:45]}' — verificar Excel origen y corregir a ELE"
+                                    )
+                                    log.warning("EL/ELE duplicate guard: %s vs %s same desc", cod, _ele)
+                                else:
+                                    reporte_lines.append(f"  ! WARN {cod} termina en EL y existe {_ele} — verificar sufijo EL vs ELE")
+                    except Exception:
+                        pass
+
                 if existing is None:
                     # Insert new: use filtered + defaults
                     # Need descripcion NOT NULL
@@ -547,6 +648,10 @@ def _process_single_file(filename: str, content: bytes) -> dict[str, Any]:
                         )
                     codigos_nuevos += 1
                     reporte_lines.append(f"  + NEW {cod} ({tipo}): {', '.join(f'{k}={v}' for k,v in filtered.items())}")
+                    # Audit NEW as creation (valor_antes NULL)
+                    for _ak, _av in filtered.items():
+                        if len(pending_audits) < 5000:
+                            pending_audits.append((cod, _ak, None, str(_av)))
                     if "precio_unitario" in filtered and float(filtered["precio_unitario"]) > 0:
                         precios_map[cod] = float(filtered["precio_unitario"])
                 else:
@@ -560,16 +665,16 @@ def _process_single_file(filename: str, content: bytes) -> dict[str, Any]:
                         # Price rule: 0 does not overwrite >0
                         if k == "precio_unitario":
                             try:
-                                old_price = float(v_old or 0)
+                                old_price = round(float(v_old or 0), 2)
                             except Exception:
                                 old_price = 0
                             try:
-                                new_price = float(v_new or 0)
+                                new_price = round(float(v_new or 0), 2)
                             except Exception:
                                 new_price = 0
                             if new_price == 0 and old_price > 0:
                                 continue
-                            if abs(new_price - old_price) < 1e-9:
+                            if round(old_price, 2) == round(new_price, 2):
                                 continue
                             updates[k] = new_price
                             changed = True
@@ -585,9 +690,9 @@ def _process_single_file(filename: str, content: bytes) -> dict[str, Any]:
                             # For numeric stock fields, compare as float
                             if k in ("stock", "stock_minimo"):
                                 try:
-                                    if abs(float(v_old or 0) - float(v_new)) < 1e-9:
+                                    if round(float(v_old or 0), 2) == round(float(v_new), 2):
                                         continue
-                                    updates[k] = float(v_new)
+                                    updates[k] = round(float(v_new), 2)
                                     changed = True
                                 except Exception:
                                     if v_old_cmp == v_new_cmp:
@@ -609,8 +714,41 @@ def _process_single_file(filename: str, content: bytes) -> dict[str, Any]:
                         with conn.cursor() as cur:
                             cur.execute(f"UPDATE maestro_stock SET {set_clause} WHERE codigo=%s", params)
                         codigos_modificados += 1
+                        # Clasificar tipo de modificación para log distinguido
+                        if "precio_unitario" in updates:
+                            precios_modificados += 1
+                        if "stock" in updates:
+                            try:
+                                old_s = float(existing.get("stock") or 0)
+                                new_s = float(updates["stock"])
+                                if new_s > old_s:
+                                    stock_altas += 1
+                                elif new_s < old_s:
+                                    stock_bajas += 1
+                            except Exception:
+                                otros_mod += 1
+                        if "stock_minimo" in updates:
+                            stock_min_mod += 1
+                        if "ubicacion" in updates:
+                            ubic_mod += 1
+                        # otros campos (descripcion, categoria, importancia) -> otros
+                        if any(k in updates for k in ("descripcion", "categoria", "importancia")):
+                            # contar solo si no fue solo precio/stock ya contado
+                            if not any(k in updates for k in ("precio_unitario", "stock", "stock_minimo", "ubicacion")):
+                                otros_mod += 1
                         reporte_lines.append(f"  ~ MOD {cod}: {', '.join(f'{k} {existing.get(k)}->{v}' for k,v in updates.items())}")
+                        # Collect audit rows per field for this modification
+                        for _ak, _av in updates.items():
+                            if len(pending_audits) < 5000:
+                                _antes = existing.get(_ak)
+                                _antes_s = None if _antes is None else str(_antes)
+                                pending_audits.append((cod, _ak, _antes_s, str(_av)))
 
+        # Resumen distinguido antes de propagación
+        reporte_lines.append(
+            f"  >> RESUMEN: {codigos_nuevos} nuevos | {codigos_modificados} mod "
+            f"({precios_modificados} precios, {stock_altas} altas stock, {stock_bajas} bajas stock, {stock_min_mod} stock_min, {ubic_mod} ubic, {otros_mod} otros)"
+        )
         # After processing rows, handle price propagation to salida_historial
         prop_total = 0
         for c, p in precios_map.items():
@@ -619,15 +757,27 @@ def _process_single_file(filename: str, content: bytes) -> dict[str, Any]:
             if cnt:
                 reporte_lines.append(f"  $ PROP {c} @ {p:.2f} -> {cnt} movimientos mes curso")
         precios_propagados = len(precios_map)  # codes with price change, not rowcount
+        if prop_total:
+            reporte_lines.append(f"  >> PROPAGADOS: {precios_propagados} codigos con cambio precio -> {prop_total} movimientos actualizados mes curso")
         # Actually count propagation successes
         # We'll keep precios_propagados as count of codes propagated with >0 rows
         # For simplicity return len(precios_map)
 
-        # Compute sin_precio global
+        # Compute sin_precio global excluding K/U (artículos sin precio por diseño)
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) AS cnt FROM maestro_stock WHERE precio_unitario IS NULL OR precio_unitario <= 0")
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM maestro_stock WHERE (precio_unitario IS NULL OR precio_unitario <= 0) AND codigo NOT LIKE 'K%' AND codigo NOT LIKE 'U%'"
+            )
             row = cur.fetchone()
             sin_precio = int(row["cnt"]) if row else 0
+            # For debugging, also compute total inc K/U for log
+            try:
+                cur.execute("SELECT COUNT(*) AS cnt FROM maestro_stock WHERE LEFT(codigo,1) IN ('K','U')")
+                _ku = cur.fetchone()
+                if _ku:
+                    reporte_lines.append(f"  >> NOTA: {int(_ku['cnt'])} códigos K/U excluidos del cómputo sin precio (total sin precio con K/U sería {_ku['cnt'] + sin_precio})")
+            except Exception:
+                pass
 
         duracion_ms = int((time.time() - t0) * 1000)
         reporte = "\n".join(reporte_lines)
@@ -635,16 +785,65 @@ def _process_single_file(filename: str, content: bytes) -> dict[str, Any]:
         if len(reporte) > 60000:
             reporte = reporte[:60000] + "\n... truncated"
 
-        # Insert log
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO maestro_stock_import_log
-                  (archivo_origen, tipo_archivo, codigos_nuevos, codigos_modificados, codigos_sin_precio, duracion_ms, reporte)
-                VALUES (%s,%s,%s,%s,%s,%s,%s)
-                """,
-                (filename, tipo, codigos_nuevos, codigos_modificados, sin_precio, duracion_ms, reporte),
-            )
+        # Insert log with enriched counters (best-effort, fallback if columns missing)
+        import_log_id: int | None = None
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO maestro_stock_import_log
+                      (archivo_origen, tipo_archivo, codigos_nuevos, codigos_modificados, codigos_sin_precio, duracion_ms, reporte,
+                       precios_modificados, stock_altas, stock_bajas, stock_min_mod, ubic_mod, otros_mod, precios_propagados, propagated_rows)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    (filename, tipo, codigos_nuevos, codigos_modificados, sin_precio, duracion_ms, reporte,
+                     precios_modificados, stock_altas, stock_bajas, stock_min_mod, ubic_mod, otros_mod, precios_propagados, prop_total),
+                )
+                try:
+                    import_log_id = int(cur.lastrowid) if cur.lastrowid else None
+                except Exception:
+                    import_log_id = None
+        except Exception as _e:
+            # Fallback if enriched columns don't exist (older DB): insert base columns
+            log.warning("Enriched import_log insert failed, fallback to base: %s", _e)
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO maestro_stock_import_log
+                      (archivo_origen, tipo_archivo, codigos_nuevos, codigos_modificados, codigos_sin_precio, duracion_ms, reporte)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    (filename, tipo, codigos_nuevos, codigos_modificados, sin_precio, duracion_ms, reporte),
+                )
+                try:
+                    import_log_id = int(cur.lastrowid) if cur.lastrowid else None
+                except Exception:
+                    import_log_id = None
+        # Insert audit rows if we have an import_log_id
+        if import_log_id is not None and pending_audits:
+            try:
+                with conn.cursor() as cur:
+                    # Cap already enforced at 5000, insert in chunks
+                    for i in range(0, len(pending_audits), 500):
+                        chunk = pending_audits[i:i+500]
+                        cur.executemany(
+                            """
+                            INSERT INTO maestro_stock_audit
+                              (codigo, campo, valor_antes, valor_despues, archivo_origen, tipo_archivo, import_log_id)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s)
+                            """,
+                            [(c, k, a, d, filename, tipo, import_log_id) for (c, k, a, d) in chunk],
+                        )
+                    if len(pending_audits) >= 5000:
+                        log.warning("Audit capped at 5000 rows for %s (import_log_id=%s)", filename, import_log_id)
+            except Exception as _ae:
+                log.warning("Failed to insert audit rows for %s: %s", filename, _ae)
+                # Do not rollback entire import for audit failure; keep log and maestro updates
+                pass
         conn.commit()
         return {
             "archivo": filename,
@@ -652,6 +851,12 @@ def _process_single_file(filename: str, content: bytes) -> dict[str, Any]:
             "codigos_nuevos": codigos_nuevos,
             "codigos_modificados": codigos_modificados,
             "codigos_sin_precio": sin_precio,
+            "precios_modificados": precios_modificados,
+            "stock_altas": stock_altas,
+            "stock_bajas": stock_bajas,
+            "stock_min_mod": stock_min_mod,
+            "ubic_mod": ubic_mod,
+            "otros_mod": otros_mod,
             "precios_propagados": precios_propagados,
             "propagated_rows": prop_total,
             "duracion_ms": duracion_ms,
@@ -880,6 +1085,80 @@ async def get_list(request: Request) -> JSONResponse:
         log.exception("List maestro_stock failed")
         return JSONResponse({"detail": str(e)}, status_code=500)
     return JSONResponse(data)
+def _parse_reporte_to_diff(reporte: str, archivo_origen: str, tipo_archivo: str, import_log_id: int, creado_en_str: str | None) -> list[dict[str, Any]]:
+    """Fallback: parse reporte TEXT lines like '~ MOD COD: campo old->new, ...' into structured rows."""
+    if not reporte:
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in reporte.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        # Match + NEW or ~ MOD
+        m_new = re.match(r"^\+\s*NEW\s+(\S+)\s*\(.*?\):\s*(.*)$", s)
+        if m_new:
+            cod = m_new.group(1).strip()
+            rest = m_new.group(2).strip()
+            # rest is k=v, k=v ...
+            for part in re.split(r",\s*", rest):
+                part = part.strip()
+                if not part or "=" not in part:
+                    continue
+                k, v = part.split("=", 1)
+                k = k.strip()
+                v = v.strip()
+                if not k:
+                    continue
+                rows.append({
+                    "codigo": cod,
+                    "campo": k,
+                    "valor_antes": None,
+                    "valor_despues": v,
+                    "archivo_origen": archivo_origen,
+                    "tipo_archivo": tipo_archivo,
+                    "import_log_id": import_log_id,
+                    "creado_en": creado_en_str,
+                })
+            continue
+        m_mod = re.match(r"^\~\s*MOD\s+(\S+):\s*(.*)$", s)
+        if m_mod:
+            cod = m_mod.group(1).strip()
+            rest = m_mod.group(2).strip()
+            # rest is "k old->new, k old->new" - split carefully
+            for part in re.split(r",\s*", rest):
+                part = part.strip()
+                if not part:
+                    continue
+                # part like "stock_minimo 0.00->2.0" or "ubicacion 2009D->200846"
+                # or "descripcion OLD -> NEW" but OLD/NEW may contain spaces; remaining heuristic:
+                # find first space then split by "->"
+                # For price/stock, it's "k val->val"
+                # For descripcion, could be "descripcion OLD->NEW" with spaces inside -> take "descripcion " prefix then rest split
+                # Use approach: first token is campo, remainder is "old->new"
+                if "->" not in part:
+                    continue
+                # campo is first word
+                first_space = part.find(" ")
+                if first_space == -1:
+                    continue
+                k = part[:first_space].strip()
+                arrow_vals = part[first_space:].strip()
+                # arrow_vals is "old->new"
+                if "->" not in arrow_vals:
+                    continue
+                old, new = arrow_vals.split("->", 1)
+                rows.append({
+                    "codigo": cod,
+                    "campo": k,
+                    "valor_antes": old.strip(),
+                    "valor_despues": new.strip(),
+                    "archivo_origen": archivo_origen,
+                    "tipo_archivo": tipo_archivo,
+                    "import_log_id": import_log_id,
+                    "creado_en": creado_en_str,
+                })
+    return rows
+
 
 async def get_import_log(request: Request) -> JSONResponse:
     tok = _token(request)
@@ -890,21 +1169,51 @@ async def get_import_log(request: Request) -> JSONResponse:
         conn = get_connection()
         try:
             _ensure_tables(conn)
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, archivo_origen, tipo_archivo, codigos_nuevos, codigos_modificados, codigos_sin_precio, duracion_ms, reporte, creado_en FROM maestro_stock_import_log ORDER BY id DESC LIMIT 20"
-                )
-                rows = cur.fetchall()
-                for r in rows:
-                    if r.get("creado_en"):
+            # Try enriched columns, fallback to base if missing
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id, archivo_origen, tipo_archivo, codigos_nuevos, codigos_modificados, codigos_sin_precio, duracion_ms, reporte, creado_en, "
+                        "precios_modificados, stock_altas, stock_bajas, stock_min_mod, ubic_mod, otros_mod, precios_propagados, propagated_rows "
+                        "FROM maestro_stock_import_log ORDER BY id DESC LIMIT 20"
+                    )
+                    rows = cur.fetchall()
+            except Exception as e:
+                if "unknown column" in str(e).lower():
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT id, archivo_origen, tipo_archivo, codigos_nuevos, codigos_modificados, codigos_sin_precio, duracion_ms, reporte, creado_en FROM maestro_stock_import_log ORDER BY id DESC LIMIT 20"
+                        )
+                        rows = cur.fetchall()
+                        for r in rows:
+                            r["precios_modificados"] = 0
+                            r["stock_altas"] = 0
+                            r["stock_bajas"] = 0
+                            r["stock_min_mod"] = 0
+                            r["ubic_mod"] = 0
+                            r["otros_mod"] = 0
+                            r["precios_propagados"] = 0
+                            r["propagated_rows"] = 0
+                else:
+                    raise
+            for r in rows:
+                if r.get("creado_en"):
+                    try:
+                        r["creado_en"] = r["creado_en"].isoformat()  # type: ignore
+                    except Exception:
+                        r["creado_en"] = str(r["creado_en"])
+                for k in ("precios_modificados", "stock_altas", "stock_bajas", "stock_min_mod", "ubic_mod", "otros_mod", "precios_propagados", "propagated_rows"):
+                    if k not in r or r[k] is None:
+                        r[k] = 0
+                    else:
                         try:
-                            r["creado_en"] = r["creado_en"].isoformat()  # type: ignore
+                            r[k] = int(r[k])
                         except Exception:
-                            r["creado_en"] = str(r["creado_en"])
-                    # Truncate reporte for list view
-                    if r.get("reporte") and len(str(r["reporte"])) > 2000:
-                        r["reporte"] = str(r["reporte"])[:2000] + "... truncated"
-                return {"items": rows}
+                            pass
+                # Truncate reporte for list view only
+                if r.get("reporte") and len(str(r["reporte"])) > 2000:
+                    r["reporte"] = str(r["reporte"])[:2000] + "... truncated"
+            return {"items": rows}
         finally:
             try:
                 conn.close()
@@ -915,6 +1224,193 @@ async def get_import_log(request: Request) -> JSONResponse:
         data = await run_in_threadpool(_work)
     except Exception as e:
         log.exception("Import log failed")
+        return JSONResponse({"detail": str(e)}, status_code=500)
+    return JSONResponse(data)
+
+
+async def get_import_log_by_id(request: Request) -> JSONResponse:
+    tok = _token(request)
+    if tok and not verificar_permiso(tok, "salidas:lectura"):
+        return JSONResponse({"detail": "Sin permiso de lectura en salidas."}, status_code=403)
+
+    log_id = request.path_params.get("id")
+    if not log_id:
+        return JSONResponse({"detail": "id requerido en path."}, status_code=400)
+
+    def _work() -> dict[str, Any]:
+        conn = get_connection()
+        try:
+            _ensure_tables(conn)
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id, archivo_origen, tipo_archivo, codigos_nuevos, codigos_modificados, codigos_sin_precio, duracion_ms, reporte, creado_en, "
+                        "precios_modificados, stock_altas, stock_bajas, stock_min_mod, ubic_mod, otros_mod, precios_propagados, propagated_rows "
+                        "FROM maestro_stock_import_log WHERE id=%s",
+                        (int(log_id),),
+                    )
+                    row = cur.fetchone()
+            except Exception as e:
+                if "unknown column" in str(e).lower():
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT id, archivo_origen, tipo_archivo, codigos_nuevos, codigos_modificados, codigos_sin_precio, duracion_ms, reporte, creado_en FROM maestro_stock_import_log WHERE id=%s",
+                            (int(log_id),),
+                        )
+                        row = cur.fetchone()
+                        if row:
+                            for k in ("precios_modificados", "stock_altas", "stock_bajas", "stock_min_mod", "ubic_mod", "otros_mod", "precios_propagados", "propagated_rows"):
+                                row[k] = 0
+                else:
+                    raise
+            if not row:
+                return {"detail": "Log no encontrado"}
+            if row.get("creado_en"):
+                try:
+                    row["creado_en"] = row["creado_en"].isoformat()  # type: ignore
+                except Exception:
+                    row["creado_en"] = str(row["creado_en"])
+            return row
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    try:
+        data = await run_in_threadpool(_work)
+    except Exception as e:
+        log.exception("Import log by id failed")
+        return JSONResponse({"detail": str(e)}, status_code=500)
+    return JSONResponse(data)
+
+
+async def get_import_diff(request: Request) -> JSONResponse:
+    tok = _token(request)
+    if tok and not verificar_permiso(tok, "salidas:lectura"):
+        return JSONResponse({"detail": "Sin permiso de lectura en salidas."}, status_code=403)
+    raw_id = request.path_params.get("id")
+    if not raw_id:
+        return JSONResponse({"detail": "id requerido en path."}, status_code=400)
+    try:
+        log_id = int(str(raw_id).strip())
+    except Exception:
+        return JSONResponse({"detail": "id debe ser entero."}, status_code=400)
+
+    def _work() -> dict[str, Any]:
+        conn = get_connection()
+        try:
+            _ensure_tables(conn)
+            with conn.cursor() as cur:
+                # Fetch log metadata for fallback
+                cur.execute("SELECT id, archivo_origen, tipo_archivo, reporte, creado_en FROM maestro_stock_import_log WHERE id=%s", (log_id,))
+                meta = cur.fetchone()
+                if not meta:
+                    return {"detail": "Log no encontrado"}
+                creado_en_str: str | None = None
+                if meta.get("creado_en"):
+                    try:
+                        creado_en_str = meta["creado_en"].isoformat()  # type: ignore
+                    except Exception:
+                        creado_en_str = str(meta["creado_en"])
+                # Try audit table first
+                try:
+                    cur.execute(
+                        "SELECT id, codigo, campo, valor_antes, valor_despues, archivo_origen, tipo_archivo, import_log_id, creado_en "
+                        "FROM maestro_stock_audit WHERE import_log_id=%s ORDER BY id ASC LIMIT 5000",
+                        (log_id,),
+                    )
+                    rows = cur.fetchall()
+                    if rows:
+                        for r in rows:
+                            if r.get("creado_en"):
+                                try:
+                                    r["creado_en"] = r["creado_en"].isoformat()  # type: ignore
+                                except Exception:
+                                    r["creado_en"] = str(r["creado_en"])
+                        return {"import_log_id": log_id, "archivo_origen": meta["archivo_origen"], "tipo_archivo": meta["tipo_archivo"], "creado_en": creado_en_str, "items": rows}
+                except Exception as e:
+                    # If table missing, fallback to parse
+                    if "doesn't exist" not in str(e).lower() and "unknown" not in str(e).lower():
+                        log.warning("Audit diff query failed for %s: %s", log_id, e)
+                # Fallback parse reporte
+                reporte = str(meta.get("reporte") or "")
+                parsed = _parse_reporte_to_diff(reporte, str(meta.get("archivo_origen") or ""), str(meta.get("tipo_archivo") or "general"), log_id, creado_en_str)
+                return {"import_log_id": log_id, "archivo_origen": meta["archivo_origen"], "tipo_archivo": meta["tipo_archivo"], "creado_en": creado_en_str, "items": parsed}
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    try:
+        data = await run_in_threadpool(_work)
+        if isinstance(data, dict) and "detail" in data and len(data) == 1:
+            return JSONResponse(data, status_code=404)
+    except Exception as e:
+        log.exception("Import diff failed")
+        return JSONResponse({"detail": str(e)}, status_code=500)
+    return JSONResponse(data)
+
+
+async def get_codigo_history(request: Request) -> JSONResponse:
+    tok = _token(request)
+    if tok and not verificar_permiso(tok, "salidas:lectura"):
+        return JSONResponse({"detail": "Sin permiso de lectura en salidas."}, status_code=403)
+    codigo = (request.path_params.get("codigo") or "").strip()
+    if not codigo:
+        return JSONResponse({"detail": "codigo requerido en path."}, status_code=400)
+    codigo = _limpiar_codigo(codigo)
+    if not codigo:
+        return JSONResponse({"detail": "codigo inválido."}, status_code=400)
+    q = request.query_params
+    try:
+        page = max(1, int(q.get("page") or "1"))
+    except ValueError:
+        page = 1
+    try:
+        limit = int(q.get("limit") or "20")
+        limit = max(1, min(100, limit))
+    except ValueError:
+        limit = 20
+    offset = (page - 1) * limit
+
+    def _work() -> dict[str, Any]:
+        conn = get_connection()
+        try:
+            _ensure_tables(conn)
+            with conn.cursor() as cur:
+                try:
+                    cur.execute("SELECT COUNT(*) AS cnt FROM maestro_stock_audit WHERE codigo=%s", (codigo,))
+                    row = cur.fetchone()
+                    total = int(row["cnt"]) if row else 0
+                    cur.execute(
+                        "SELECT id, codigo, campo, valor_antes, valor_despues, archivo_origen, tipo_archivo, import_log_id, creado_en "
+                        "FROM maestro_stock_audit WHERE codigo=%s ORDER BY creado_en DESC, id DESC LIMIT %s OFFSET %s",
+                        (codigo, limit, offset),
+                    )
+                    items = cur.fetchall()
+                    for r in items:
+                        if r.get("creado_en"):
+                            try:
+                                r["creado_en"] = r["creado_en"].isoformat()  # type: ignore
+                            except Exception:
+                                r["creado_en"] = str(r["creado_en"])
+                    return {"codigo": codigo, "total": total, "page": page, "limit": limit, "items": items}
+                except Exception as e:
+                    if "doesn't exist" in str(e).lower() or "unknown" in str(e).lower():
+                        return {"codigo": codigo, "total": 0, "page": page, "limit": limit, "items": []}
+                    raise
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    try:
+        data = await run_in_threadpool(_work)
+    except Exception as e:
+        log.exception("Codigo history failed for %s", codigo)
         return JSONResponse({"detail": str(e)}, status_code=500)
     return JSONResponse(data)
 
@@ -930,14 +1426,23 @@ async def get_stats(request: Request) -> JSONResponse:
             with conn.cursor() as cur:
                 cur.execute("SELECT COUNT(*) AS cnt FROM maestro_stock WHERE activo=1")
                 total = int((cur.fetchone() or {}).get("cnt", 0))
-                cur.execute("SELECT COUNT(*) AS cnt FROM maestro_stock WHERE activo=1 AND (precio_unitario IS NULL OR precio_unitario <= 0)")
+                cur.execute("SELECT COUNT(*) AS cnt FROM maestro_stock WHERE activo=1 AND (precio_unitario IS NULL OR precio_unitario <= 0) AND codigo NOT LIKE 'K%' AND codigo NOT LIKE 'U%'")
                 sin_precio = int((cur.fetchone() or {}).get("cnt", 0))
+                # Also compute total sin precio incl K/U for transparency
+                try:
+                    cur.execute("SELECT COUNT(*) AS cnt FROM maestro_stock WHERE activo=1 AND (precio_unitario IS NULL OR precio_unitario <= 0)")
+                    sin_precio_total = int((cur.fetchone() or {}).get("cnt", 0))
+                    cur.execute("SELECT COUNT(*) AS cnt FROM maestro_stock WHERE activo=1 AND LEFT(codigo,1) IN ('K','U')")
+                    ku_total = int((cur.fetchone() or {}).get("cnt", 0))
+                except Exception:
+                    sin_precio_total = sin_precio
+                    ku_total = 0
                 cur.execute("SELECT COUNT(*) AS cnt FROM maestro_stock WHERE activo=1 AND stock <= stock_minimo")
                 criticos = int((cur.fetchone() or {}).get("cnt", 0))
                 # Also breakdown by importancia
                 cur.execute("SELECT importancia, COUNT(*) AS cnt FROM maestro_stock WHERE activo=1 GROUP BY importancia")
                 by_imp = {row["importancia"]: int(row["cnt"]) for row in cur.fetchall()}
-                return {"total": total, "sin_precio": sin_precio, "criticos": criticos, "por_importancia": by_imp}
+                return {"total": total, "sin_precio": sin_precio, "sin_precio_total": sin_precio_total, "sin_precio_ku_excluidos": ku_total, "criticos": criticos, "por_importancia": by_imp}
         finally:
             try:
                 conn.close()
