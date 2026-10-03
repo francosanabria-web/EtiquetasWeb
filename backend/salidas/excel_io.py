@@ -949,6 +949,26 @@ def _atencion_row_to_export(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _con_retiro_count(rows: list[dict[str, Any]]) -> tuple[int, int, float]:
+    """Cuenta atenciones con retiro y sin retiro desde las filas originales.
+
+    Truthy para con_retiro: 1, True, "1", "SI".
+    Devuelve (total, con_retiro, sin_retiro).
+    """
+    total = len(rows) if rows else 0
+    if total == 0:
+        return (0, 0, 0)
+    con = sum(
+        1
+        for r in rows
+        if r.get("con_retiro") in (1, True, "1", "SI")
+        or (isinstance(r.get("con_retiro"), str) and r.get("con_retiro").strip().upper() in ("1", "SI"))
+    )
+    sin = total - con
+    pct = round(con / total * 100, 1) if total > 0 else 0.0
+    return (total, con, sin)
+
+
 def workbook_atenciones(rows: list[dict[str, Any]], sheet_name: str = "Atenciones") -> Workbook:
     """Workbook con formato profesional para export atenciones."""
     cols = list(ATENCIONES_COLUMNAS_EXPORT)
@@ -990,6 +1010,30 @@ def workbook_atenciones(rows: list[dict[str, Any]], sheet_name: str = "Atencione
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(cols))}{last_row}"
     ws.row_dimensions[1].height = 18
+
+    # --- Hoja RESUMEN con conteo final ---
+    total, con, sin = _con_retiro_count(rows)
+    pct = round(con / total * 100, 1) if total > 0 else 0.0
+    ws_resumen = wb.create_sheet("RESUMEN")
+    summary_cols = ["Total atenciones", "Con retiro (SI)", "Sin stock (NO)", "% con retiro"]
+    for col_idx, header in enumerate(summary_cols, start=1):
+        cell = ws_resumen.cell(row=1, column=col_idx, value=header)
+        cell.fill = _HEADER_FILL
+        cell.font = _HEADER_FONT
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = _THIN
+        ws_resumen.column_dimensions[get_column_letter(col_idx)].width = 22.0
+    row_idx = 2
+    ws_resumen.cell(row=row_idx, column=1, value=total).alignment = Alignment(horizontal="center", vertical="center")
+    ws_resumen.cell(row=row_idx, column=1).border = _THIN
+    ws_resumen.cell(row=row_idx, column=2, value=f"{con} — SI").alignment = Alignment(horizontal="center", vertical="center")
+    ws_resumen.cell(row=row_idx, column=2).border = _THIN
+    ws_resumen.cell(row=row_idx, column=3, value=f"{sin} — NO").alignment = Alignment(horizontal="center", vertical="center")
+    ws_resumen.cell(row=row_idx, column=3).border = _THIN
+    pct_str = f"{pct}%" if total > 0 else "0%"
+    ws_resumen.cell(row=row_idx, column=4, value=pct_str).alignment = Alignment(horizontal="center", vertical="center")
+    ws_resumen.cell(row=row_idx, column=4).border = _THIN
+
     return wb
 
 

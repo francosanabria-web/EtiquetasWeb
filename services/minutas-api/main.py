@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import os
 import smtplib
+import traceback
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, status
@@ -300,6 +301,9 @@ def preview_email(sesion_id: int, asunto: str | None = None) -> PreviewEmailResp
         a, txt, html = _email_desde_excel(sesion_id, asunto)
     except LookupError as e:
         raise _http_from_lookup(e) from e
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error interno al generar preview: {e}") from e
     return PreviewEmailResponse(asunto=a, cuerpo_texto=txt, cuerpo_html=html)
 
 
@@ -317,9 +321,22 @@ def enviar_minuta_endpoint(sesion_id: int, body: EnviarMinutaRequest) -> EnviarM
     except ValueError as e:
         raise _http_from_value(e) from e
     except smtplib.SMTPException as e:
+        traceback.print_exc()
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY,
             detail=f"Error al enviar correo: {e}",
+        ) from e
+    except (OSError, TimeoutError, ConnectionError) as e:
+        traceback.print_exc()
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error de conexión SMTP: {e}",
+        ) from e
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {e}",
         ) from e
 
     return EnviarMinutaResponse(

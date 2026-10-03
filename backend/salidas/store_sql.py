@@ -696,7 +696,7 @@ def historial_por_orden_fecha(numero_orden: str, fecha: date | str | None = None
 
 # ---------- v5: soft-delete / edit auditable ----------
 
-_ALLOWED_EDIT_FIELDS = frozenset({"tipo_comprobante", "numero_orden", "maquina_sitio", "sector_nombre", "operario_nombre", "cantidad", "precio_unitario"})
+_ALLOWED_EDIT_FIELDS = frozenset({"tipo_comprobante", "numero_orden", "maquina_sitio", "sector_nombre", "operario_nombre", "cantidad", "precio_unitario", "fecha"})
 
 
 def historial_get_by_id(mov_id: int) -> dict[str, Any] | None:
@@ -837,7 +837,7 @@ def historial_editar(mov_id: int, cambios: dict[str, Any], editado_por: str, mot
         else:
             sanitized[k] = v
     if not sanitized:
-        raise ValueError("No hay cambios validos (campos permitidos: tipo_comprobante, numero_orden, maquina_sitio, sector_nombre, operario_nombre, cantidad, precio_unitario).")
+        raise ValueError("No hay cambios validos (campos permitidos: tipo_comprobante, numero_orden, maquina_sitio, sector_nombre, operario_nombre, cantidad, precio_unitario, fecha).")
     editado_por_s = str(editado_por or "").strip()
     if not editado_por_s:
         raise ValueError("editado_por requerido.")
@@ -915,6 +915,31 @@ def historial_editar(mov_id: int, cambios: dict[str, Any], editado_por: str, mot
                     if cur_precio_f is not None and abs(precio - cur_precio_f) < 1e-9:
                         continue
                     updates["precio_unitario"] = round(precio, 2)
+                elif k == "fecha":
+                    from excel_io import nombre_mes, parse_fecha
+
+                    fecha_raw = str(raw).strip()
+                    if not fecha_raw:
+                        raise ValueError("fecha no puede estar vacia.")
+                    fecha_d = parse_fecha(fecha_raw)
+                    if fecha_d is None:
+                        raise ValueError("fecha invalida. Use AAAA-MM-DD o DD/MM/AAAA.")
+                    cur_fecha_raw = before_dict.get("fecha")
+                    from datetime import date as _date2
+
+                    if isinstance(cur_fecha_raw, str):
+                        cur_fecha_d = parse_fecha(cur_fecha_raw)
+                    elif isinstance(cur_fecha_raw, datetime):
+                        cur_fecha_d = cur_fecha_raw.date()
+                    elif isinstance(cur_fecha_raw, _date2):
+                        cur_fecha_d = cur_fecha_raw
+                    else:
+                        cur_fecha_d = None
+                    if cur_fecha_d is not None and cur_fecha_d == fecha_d:
+                        continue
+                    updates["fecha"] = fecha_d
+                    updates["mes"] = nombre_mes(fecha_d.month)
+                    updates["anio"] = fecha_d.year
             if not updates:
                 raise ValueError("Sin cambios (valores iguales a los actuales).")
             # Si cambia cantidad o precio, recalcular monto_total
@@ -944,6 +969,9 @@ def historial_editar(mov_id: int, cambios: dict[str, Any], editado_por: str, mot
                 "cantidad": "cantidad",
                 "precio_unitario": "precio_unitario",
                 "monto_total": "monto_total",
+                "fecha": "fecha",
+                "mes": "mes",
+                "anio": "anio",
             }
             for uk, val in updates.items():
                 col = col_map.get(uk)

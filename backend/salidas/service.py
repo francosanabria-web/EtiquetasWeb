@@ -654,6 +654,89 @@ def listar_movimientos(
     return {"total": int(len(df)), "items": a_registros(df, limite=lim), "columnas": list(df.columns) if not df.empty else []}
 
 
+def _normalizar_linea_gasto(val) -> str:
+    """Agrupa comprobante como linea (L1…L7, PAÑOL, OTROS) para resumen diario."""
+    if val is None:
+        return "OTROS"
+    s = str(val).strip().upper()
+    if not s:
+        return "OTROS"
+    if s in ("PAÑ", "PAN", "PAÑOL", "PANOL"):
+        return "PAÑOL"
+    for ln in ("L1", "L2", "L3", "L4", "L5", "L6", "L7"):
+        if s == ln or s.startswith(ln + " ") or s.startswith(ln + "-") or s.startswith(ln + "/"):
+            return ln
+    if s == "PROYECTOS":
+        return "PROYECTOS"
+    return s
+
+
+def _orden_lineas_gasto():
+    return ["PAÑOL"] + [f"L{i}" for i in range(1, 8)] + ["PROYECTOS"]
+
+
+def resumen_diario(fecha: str, incluir_anulados: bool = False) -> dict[str, Any]:
+    """Retorna resumen diario agrupado por tipo_comprobante normalizado (PAÑOL, L1-L7, OTROS).
+
+    Consulta salida_historial via store_sql. Retorna grupos con totales y detalle.
+    """
+    from store_sql import historial_listar
+
+    d0 = fecha
+    d1 = fecha
+    rows = historial_listar(desde=d0, hasta=d1, limite=10000, incluir_anulados=incluir_anulados)
+    if not rows:
+        return {"fecha": fecha, "grupos": [], "total_general": 0.0, "mensaje": "Sin movimientos para la fecha seleccionada."}
+
+    # Agrupar por linea normalizada
+    grupos_data: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        tipo_raw = r.get("tipo_comprobante") or r.get("TIPO_COMPROBANTE") or ""
+        linea = _normalizar_linea_gasto(tipo_raw)
+        if linea not in grupos_data:
+            grupos_data[linea] = []
+        monto = float(r.get("monto_total") or r.get("MONTO_TOTAL_SALIDA") or 0)
+        cant = float(r.get("cantidad") or r.get("CANTIDAD") or 0)
+        grupos_data[linea].append({
+            "codigo": str(r.get("codigo") or r.get("CODIGO") or ""),
+            "descripcion": str(r.get("descripcion") or r.get("DESCRIPCION") or ""),
+            "cantidad": cant,
+            "monto": monto,
+            "tipo_comprobante": str(tipo_raw),
+            "numero_orden": str(r.get("numero_orden") or r.get("NUMERO_ORDEN") or ""),
+            "operario": str(r.get("operario_nombre") or r.get("OPERARIO") or ""),
+            "sector": str(r.get("sector_nombre") or r.get("SECTOR") or ""),
+            "maquina": str(r.get("maquina_sitio") or r.get("MAQUINA_SITIO") or ""),
+            "fecha": str(r.get("fecha") or ""),
+        })
+
+    # Ordenar grupos: PAÑOL, L1..L7, PROYECTOS, OTROS
+    orden = _orden_lineas_gasto()
+    grupos: list[dict[str, Any]] = []
+    total_general = 0.0
+    for linea in orden:
+        if linea in grupos_data and grupos_data[linea]:
+            items = grupos_data[linea]
+            total_grupo = sum(it["monto"] for it in items)
+            total_general += total_grupo
+            grupos.append({
+                "linea": linea,
+                "total": round(total_grupo, 2),
+                "cantidad": len(items),
+                "items": items,
+            })
+    # Agregar OTROS si existe y no esta ya en orden
+    if "OTROS" in grupos_data and grupos_data["OTROS"]:
+        otros_items = grupos_data["OTROS"]
+        otros_total = sum(it["monto"] for it in otros_items)
+        total_general += otros_total
+        # Insertar OTROS al final si no existe
+        if not any(g["linea"] == "OTROS" for g in grupos):
+            grupos.append({"linea": "OTROS", "total": round(otros_total, 2), "cantidad": len(otros_items), "items": otros_items})
+
+    return {"fecha": fecha, "grupos": grupos, "total_general": round(total_general, 2), "mensaje": ""}
+
+
 def refresh_maestro() -> dict[str, Any]:
     s = SalidasStore.get()
     ts = s.refresh()
@@ -830,6 +913,15 @@ def kpi_atenciones(periodo: str | None = None, desde: str | None = None, hasta: 
             r["periodo"] = v.isoformat() if isinstance(v, datetime) else v.isoformat()
         elif v is not None:
             r["periodo"] = str(v)
+        for k in ("total", "con_retiro", "sin_retiro"):
+            try:
+                r[k] = int(r[k]) if r.get(k) is not None else 0
+            except (TypeError, ValueError):
+                r[k] = 0
+        try:
+            r["pct_con_retiro"] = float(r["pct_con_retiro"]) if r.get("pct_con_retiro") is not None else None
+        except (TypeError, ValueError):
+            r["pct_con_retiro"] = None
     result: dict[str, Any] = {"kpi_mensual": mensual}
     if periodo:
         return result
@@ -839,6 +931,15 @@ def kpi_atenciones(periodo: str | None = None, desde: str | None = None, hasta: 
             fv = r.get("fecha")
             if isinstance(fv, (date, datetime)):
                 r["fecha"] = fv.isoformat()
+            for k in ("total", "con_retiro", "sin_retiro"):
+                try:
+                    r[k] = int(r[k]) if r.get(k) is not None else 0
+                except (TypeError, ValueError):
+                    r[k] = 0
+            try:
+                r["pct_con_retiro"] = float(r["pct_con_retiro"]) if r.get("pct_con_retiro") is not None else None
+            except (TypeError, ValueError):
+                r["pct_con_retiro"] = None
         result["por_dia"] = por_dia
     else:
         por_dia = atenciones_por_dia()
@@ -846,6 +947,15 @@ def kpi_atenciones(periodo: str | None = None, desde: str | None = None, hasta: 
             fv = r.get("fecha")
             if isinstance(fv, (date, datetime)):
                 r["fecha"] = fv.isoformat()
+            for k in ("total", "con_retiro", "sin_retiro"):
+                try:
+                    r[k] = int(r[k]) if r.get(k) is not None else 0
+                except (TypeError, ValueError):
+                    r[k] = 0
+            try:
+                r["pct_con_retiro"] = float(r["pct_con_retiro"]) if r.get("pct_con_retiro") is not None else None
+            except (TypeError, ValueError):
+                r["pct_con_retiro"] = None
         result["por_dia"] = por_dia[:31]
     if mensual:
         result["resumen"] = mensual[0]
@@ -896,7 +1006,7 @@ def editar_movimiento(movimiento_id: int | str, cambios: dict[str, Any], realiza
     if not isinstance(cambios, dict) or not cambios:
         raise ValueError("cambios requerido.")
     # Filtrar solo permitidos a nivel service también (defense in depth)
-    permitidos = {"tipo_comprobante", "numero_orden", "maquina_sitio", "sector_nombre", "operario_nombre", "cantidad", "precio_unitario"}
+    permitidos = {"tipo_comprobante", "numero_orden", "maquina_sitio", "sector_nombre", "operario_nombre", "cantidad", "precio_unitario", "fecha"}
     clean: dict[str, Any] = {}
     for k, v in cambios.items():
         kk = str(k).strip().lower()
@@ -909,7 +1019,7 @@ def editar_movimiento(movimiento_id: int | str, cambios: dict[str, Any], realiza
     quien = str(realizado_por or "").strip() or "SISTEMA"
     quien = quien[:120].upper()
     mot = str(motivo).strip()[:500] if motivo is not None and str(motivo).strip() else None
-    # Sanitizar strings base: upper/strip
+    # Sanitizar strings base: upper/strip (fecha se mantiene ISO, no upper)
     for fk in ("tipo_comprobante", "numero_orden", "maquina_sitio", "sector_nombre", "operario_nombre"):
         if fk in clean and isinstance(clean[fk], str):
             clean[fk] = clean[fk].strip()
@@ -917,6 +1027,13 @@ def editar_movimiento(movimiento_id: int | str, cambios: dict[str, Any], realiza
                 clean[fk] = clean[fk].upper()
             elif fk == "numero_orden":
                 clean[fk] = clean[fk].strip()
+    if "fecha" in clean and isinstance(clean["fecha"], str):
+        clean["fecha"] = clean["fecha"].strip()
+        # Validacion basica de fecha (usa parse_fecha del excel_io)
+        from excel_io import parse_fecha
+
+        if parse_fecha(clean["fecha"]) is None:
+            raise ValueError("fecha invalida. Use AAAA-MM-DD o DD/MM/AAAA.")
     try:
         from store_sql import historial_editar
     except Exception as e:

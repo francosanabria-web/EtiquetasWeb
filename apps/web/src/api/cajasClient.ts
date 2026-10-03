@@ -60,6 +60,8 @@ export type Herramienta = {
 export type InventarioDetalle = {
   id: number;
   herramienta_codigo: string;
+  herramienta_descripcion?: string;
+  descripcion?: string;
   articulo_codigo: string | null;
   cantidad: number;
   presente: boolean;
@@ -475,16 +477,35 @@ export async function getIdealVersiones(
 
 export async function getTecnicosCards(
   token: string,
-  params?: { limit?: number; offset?: number; q?: string },
+  params?: { limit?: number; offset?: number; q?: string; con_inventario?: boolean },
 ): Promise<TecnicoCardsResponse> {
   const searchParams = new URLSearchParams();
   if (params?.limit != null) searchParams.set("limit", String(params.limit));
   if (params?.offset != null) searchParams.set("offset", String(params.offset));
   if (params?.q) searchParams.set("q", params.q);
+  if (params?.con_inventario !== undefined) searchParams.set("con_inventario", params.con_inventario ? "true" : "false");
   const qs = searchParams.toString();
   const path = qs ? `/api/cajas/tecnicos-cards?${qs}` : "/api/cajas/tecnicos-cards";
   const data = await fetchJson<{ items: TecnicoCard[]; total: number }>(path, {}, token);
   return { items: data.items ?? [], total: data.total ?? 0 };
+}
+
+export type RecomendacionCodigo = {
+  codigo: string;
+  descripcion: string;
+  alias: string | null;
+  score: number;
+};
+
+export async function recomendarCodigo(
+  token: string,
+  descripcion: string,
+  limit = 5,
+): Promise<{ items: RecomendacionCodigo[]; total: number; query: string }> {
+  const sp = new URLSearchParams({ descripcion, limit: String(limit) });
+  const path = `/api/cajas/herramientas/recomendar-codigo?${sp.toString()}`;
+  const data = await fetchJson<{ items: RecomendacionCodigo[]; total: number; query: string }>(path, {}, token);
+  return data;
 }
 
 export async function getTecnicoHistorial(

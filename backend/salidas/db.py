@@ -48,6 +48,24 @@ def _get_pool():
             cursorclass=DictCursor,
             autocommit=False,
         )
+    else:
+        try:
+            _pool.ping(reconnect=True)
+        except Exception:
+            try:
+                _pool.close()
+            except Exception:
+                pass
+            _pool = connections.Connection(
+                host=DB_HOST,
+                port=DB_PORT,
+                user=DB_USER,
+                password=DB_PASSWORD,
+                database=DB_NAME,
+                charset="utf8mb4",
+                cursorclass=DictCursor,
+                autocommit=False,
+            )
     return _pool
 
 
@@ -64,6 +82,29 @@ def get_connection():
             charset="utf8mb4",
             cursorclass=DictCursor,
         )
+    else:
+        try:
+            conn.ping(reconnect=True)
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = connections.Connection(
+                host=DB_HOST,
+                port=DB_PORT,
+                user=DB_USER,
+                password=DB_PASSWORD,
+                database=DB_NAME,
+                charset="utf8mb4",
+                cursorclass=DictCursor,
+            )
+            # update pool reference if this was the pooled conn
+            try:
+                global _pool
+                _pool = conn
+            except Exception:
+                pass
     return conn
 
 

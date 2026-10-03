@@ -24,6 +24,7 @@ from store import (
     eliminar_limpieza as store_eliminar_limpieza, obtener_limpieza,
     listar_asignaciones, crear_asignacion as store_crear_asignacion, cerrar_asignacion as store_cerrar_asignacion,
     obtener_asignacion, eliminar_asignacion as store_eliminar_asignacion,
+    recomendar_codigo_por_descripcion,
 )
 
 
@@ -351,6 +352,21 @@ def get_tecnicos_cards(token: str, params: dict[str, Any] | None = None) -> dict
     if params is None:
         params = {}
     q = str(params.get("q", "") or "")
+    # con_inventario param: solo técnicos que ya tienen al menos un inventario
+    con_inv_raw = params.get("con_inventario")
+    if con_inv_raw is None:
+        con_inv_raw = params.get("soloConInventario") or params.get("conInventario")
+    # Default True: solo con inventario (pedido del usuario) — solo si explícitamente piden false se muestra todo
+    con_inventario = True
+    if con_inv_raw is not None:
+        s = str(con_inv_raw).strip().lower()
+        if s in ("0", "false", "no", "off"):
+            con_inventario = False
+        elif s in ("1", "true", "si", "sí", "yes"):
+            con_inventario = True
+        else:
+            # valor no reconocido → mantener True
+            con_inventario = True
     try:
         limit = int(params.get("limit", 25))
     except Exception:
@@ -366,7 +382,7 @@ def get_tecnicos_cards(token: str, params: dict[str, Any] | None = None) -> dict
     if offset < 0:
         offset = 0
     try:
-        return listar_tecnicos_cards(q=q, limit=limit, offset=offset)
+        return listar_tecnicos_cards(q=q, limit=limit, offset=offset, con_inventario=con_inventario)
     except ValueError as e:
         return (str(e), 400)
 
@@ -656,3 +672,25 @@ def get_asignacion_by_id(token: str, asignacion_id: int) -> dict[str, Any] | tup
     if result is None:
         return ("No encontrado", 404)
     return result
+
+
+# --------------------------------------------------------------------------- #
+# Recomendacion codigo maestro_stock por descripcion
+# --------------------------------------------------------------------------- #
+def get_recomendacion_codigo(token: str, params: dict[str, Any] | None = None) -> dict[str, Any] | tuple[str, int]:
+    """GET /api/cajas/herramientas/recomendar-codigo?descripcion=... — sugiere codigos maestro_stock."""
+    if not _requerir_permiso(token, "cajas:lectura"):
+        return ("No autorizado", 401)
+    if params is None:
+        params = {}
+    descripcion = str(params.get("descripcion") or params.get("q") or "").strip()
+    if not descripcion:
+        return ({"detail": "descripcion es obligatoria."}, 400)  # type: ignore
+    try:
+        limit = int(params.get("limit", 5))
+    except Exception:
+        limit = 5
+    try:
+        return recomendar_codigo_por_descripcion(descripcion=descripcion, limit=limit)
+    except ValueError as e:
+        return (str(e), 400)

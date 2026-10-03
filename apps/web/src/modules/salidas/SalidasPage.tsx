@@ -29,6 +29,7 @@ import "../../styles/salidas.css";
 import AtencionModal from "./AtencionModal";
 import MaestroStockModal from "./MaestroStockModal";
 import PrintRemito from "./PrintRemito";
+import ResumenDiarioModal from "./ResumenDiarioModal";
 
 function nuevoId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -124,11 +125,47 @@ function EditarModal({
   const [operario, setOperario] = useState("");
   const [cantidad, setCantidad] = useState("");
   const [precio, setPrecio] = useState("");
+  const [fechaEdit, setFechaEdit] = useState("");
   const [motivo, setMotivo] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const operariosEdit = useMemo(() => operariosParaSector(cats, sector), [cats, sector]);
+
+  // Helper: convertir FECHA del historial (D/M/YYYY, YYYY-MM-DD, ISO) a YYYY-MM-DD para input[type=date]
+  function fechaToInput(v: unknown): string {
+    if (v == null) return "";
+    const s = String(v).trim();
+    if (!s) return "";
+    // ISO con T
+    if (s.includes("T")) {
+      const datePart = s.split("T")[0];
+      if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return datePart;
+    }
+    if (s.includes("/")) {
+      // D/M/YYYY o DD/MM/YYYY
+      const parts = s.split("/").map((p) => p.trim());
+      if (parts.length === 3) {
+        const [d, m, y] = parts;
+        const yy = y.length === 2 ? `20${y.padStart(2, "0")}` : y.padStart(4, "0");
+        return `${yy}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+      }
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    // fallback: intentar parse Date
+    try {
+      const d = new Date(s);
+      if (!Number.isNaN(d.getTime())) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${y}-${m}-${day}`;
+      }
+    } catch {
+      // ignore
+    }
+    return s;
+  }
 
   useEffect(() => {
     if (open && row) {
@@ -139,6 +176,7 @@ function EditarModal({
       setOperario(String(row.OPERARIO || ""));
       setCantidad(String(row.CANTIDAD ?? ""));
       setPrecio(row.PRECIO_UNITARIO != null ? String(row.PRECIO_UNITARIO) : "");
+      setFechaEdit(fechaToInput(row.FECHA));
       setMotivo("");
       setErr(null);
       setSaving(false);
@@ -162,6 +200,7 @@ function EditarModal({
     const curOper = String(row.OPERARIO || "").toUpperCase();
     const curCant = String(row.CANTIDAD ?? "");
     const curPrec = row.PRECIO_UNITARIO != null ? String(row.PRECIO_UNITARIO) : "";
+    const curFecha = fechaToInput(row.FECHA);
     return (
       tipo.trim().toUpperCase() !== curTipo ||
       orden.trim() !== curOrden ||
@@ -169,7 +208,8 @@ function EditarModal({
       sector.trim().toUpperCase() !== curSector ||
       operario.trim().toUpperCase() !== curOper ||
       cantidad.trim() !== curCant.trim() ||
-      precio.trim() !== curPrec.trim()
+      precio.trim() !== curPrec.trim() ||
+      fechaEdit.trim() !== curFecha.trim()
     );
   }
 
@@ -211,6 +251,25 @@ function EditarModal({
     } else if (precio.trim() === "" && curPrec !== "") {
       // allow clearing? skip
     }
+    const curFecha = fechaToInput(row.FECHA);
+    if (fechaEdit.trim() && fechaEdit.trim() !== curFecha.trim()) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaEdit.trim())) {
+        setErr("Fecha inválida. Use AAAA-MM-DD.");
+        setSaving(false);
+        return;
+      }
+      const d = new Date(fechaEdit.trim());
+      if (Number.isNaN(d.getTime())) {
+        setErr("Fecha inválida.");
+        setSaving(false);
+        return;
+      }
+      payload["fecha"] = fechaEdit.trim();
+    } else if (!fechaEdit.trim() && curFecha) {
+      setErr("Fecha no puede estar vacía.");
+      setSaving(false);
+      return;
+    }
     if (motivo.trim()) payload["motivo"] = motivo.trim();
     if (Object.keys(payload).length === 0 || (Object.keys(payload).length === 1 && "motivo" in payload)) {
       setErr("Sin cambios relevantes.");
@@ -233,8 +292,12 @@ function EditarModal({
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.42)" }} />
       <form onSubmit={(e) => void handleSubmit(e)} style={{ position: "relative", background: "var(--surface, #fff)", borderRadius: 12, padding: 20, minWidth: 420, maxWidth: 640, width: "94%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 12px 32px rgba(0,0,0,0.2)", display: "flex", flexDirection: "column", gap: 12 }}>
         <h3 style={{ margin: 0, fontSize: "1.05rem" }}>Editar baja #{row.id} · {row.CODIGO}</h3>
-        <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--muted)" }}>Solo campos de tipeo. <b>Código</b> y <b>Fecha</b> no editables. Stock no se revierte (corrección histórica).</p>
+        <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--muted)" }}><b>Código</b> no editable. <b>Fecha</b> editable (auditable, corrige mes/año del reporte). Stock no se revierte (corrección histórica).</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+          <label className="sal-field">
+            <span className="sal-muted">Fecha *</span>
+            <input type="date" value={fechaEdit} onChange={(e) => setFechaEdit(e.target.value)} required style={{ borderRadius: 8, border: "0.5px solid var(--border)", padding: "8px 10px", fontSize: "0.9rem" }} />
+          </label>
           <label className="sal-field">
             <span className="sal-muted">Tipo comprobante</span>
             <select value={tipo} onChange={(e) => setTipo(e.target.value)}>
@@ -408,6 +471,7 @@ export default function SalidasPage() {
   const [maquina, setMaquina] = useState("");
   const [sector, setSector] = useState("");
   const [operario, setOperario] = useState("");
+  const [operarioManualMode, setOperarioManualMode] = useState(false);
   const [ordenBloqueada, setOrdenBloqueada] = useState(false);
   const [cabeceraError, setCabeceraError] = useState<string | null>(null);
 
@@ -453,6 +517,9 @@ export default function SalidasPage() {
     maquina: string;
     items: ItemPendiente[] | MovimientoRow[];
   } | null>(null);
+
+  // Resumen diario modal
+  const [showResumen, setShowResumen] = useState(false);
 
   const codigoRef = useRef<HTMLInputElement>(null);
   const cantidadRef = useRef<HTMLInputElement>(null);
@@ -537,15 +604,17 @@ export default function SalidasPage() {
 
   const operarios = useMemo(() => operariosParaSector(cats, sector), [cats, sector]);
 
+  // Blindado por defecto: si operario no está en lista del sector, se limpia; en modo manual no se toca
   useEffect(() => {
+    if (operarioManualMode) return;
     if (!operarios.length) {
-      setOperario("");
+      if (operario) setOperario("");
       return;
     }
     if (operario && !operarios.includes(operario)) {
       setOperario("");
     }
-  }, [operarios, operario]);
+  }, [operarios, operario, operarioManualMode]);
 
   const totalCarga = useMemo(
     () => pendientes.reduce((acc, p) => acc + Math.abs(p.monto), 0),
@@ -625,9 +694,9 @@ export default function SalidasPage() {
     setTipo("");
     setSector("");
     setOperario("");
+    setOperarioManualMode(false);
     setProyeccion(null);
     setProyError(null);
-    setFecha(hoyIsoLocal());
     setSeleccionadoId(null);
     setCabeceraError(null);
   }
@@ -1006,16 +1075,59 @@ export default function SalidasPage() {
 
           <label className="sal-field">
             <span className="sal-muted">Técnico / operario *</span>
-            <select id="sal-operario" value={operario} onChange={(e) => setOperario(e.target.value)} aria-label="Operario" disabled={!sector || ordenBloqueada}>
-              <option value="" disabled>
-                {sector ? "Seleccione operario…" : "Seleccione sector primero…"}
-              </option>
-              {operarios.map((o) => (
-                <option key={o} value={o}>
-                  {o}
+            {!operarioManualMode ? (
+              <select
+                id="sal-operario"
+                value={operario}
+                onChange={(e) => {
+                  if (e.target.value === "__MANUAL__") {
+                    setOperario("");
+                    setOperarioManualMode(true);
+                  } else {
+                    setOperario(e.target.value);
+                  }
+                }}
+                aria-label="Operario"
+                disabled={!sector || ordenBloqueada}
+              >
+                <option value="" disabled>
+                  {sector ? "Seleccione operario…" : "Seleccione sector primero…"}
                 </option>
-              ))}
-            </select>
+                {operarios.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+                <option value="__MANUAL__">➕ Nuevo / Insertar manual…</option>
+              </select>
+            ) : (
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  id="sal-operario-manual"
+                  value={operario}
+                  onChange={(e) => setOperario(e.target.value.toUpperCase())}
+                  placeholder="Escribí nuevo operario…"
+                  aria-label="Operario manual"
+                  disabled={ordenBloqueada}
+                  autoComplete="off"
+                  style={{ flex: 1 }}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setOperario("");
+                    setOperarioManualMode(false);
+                  }}
+                  disabled={ordenBloqueada}
+                  style={{ whiteSpace: "nowrap", minHeight: 36 }}
+                  title="Volver al listado"
+                >
+                  ↩ Listado
+                </button>
+              </div>
+            )}
           </label>
         </div>
 
@@ -1256,6 +1368,9 @@ export default function SalidasPage() {
             <button type="button" className="btn-secondary" onClick={() => void handleExportDiario()} style={{ minHeight: 36 }}>
               📥 Diario del día ({fecha})
             </button>
+            <button type="button" className="btn-secondary" onClick={() => setShowResumen(true)} style={{ minHeight: 36 }}>
+              📊 Resumen diario
+            </button>
           </div>
         </div>
 
@@ -1439,6 +1554,13 @@ export default function SalidasPage() {
             }) || [],
           }}
           onClose={() => setShowRemito(false)}
+        />
+      )}
+      {showResumen && (
+        <ResumenDiarioModal
+          open={showResumen}
+          onClose={() => setShowResumen(false)}
+          defaultFecha={fecha}
         />
       )}
     </div>

@@ -70,7 +70,7 @@ def init_db() -> None:
                 """
                 CREATE TABLE IF NOT EXISTS cajas_herramientas (
                     id INT AUTO_INCREMENT PRIMARY KEY,
-                    codigo VARCHAR(100) NOT NULL UNIQUE,
+                    codigo VARCHAR(100) NULL UNIQUE,
                     descripcion VARCHAR(255) NULL,
                     categoria VARCHAR(50) NOT NULL DEFAULT 'HERRAMIENTA',
                     unidad VARCHAR(20) NOT NULL DEFAULT 'UND',
@@ -80,6 +80,22 @@ def init_db() -> None:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
+            # Migración idempotente: permitir codigo NULL (base sin codigo) si tabla existia con NOT NULL
+            try:
+                cur.execute(
+                    """
+                    SELECT IS_NULLABLE FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='cajas_herramientas' AND COLUMN_NAME='codigo'
+                    """
+                )
+                _r = cur.fetchone()
+                if _r and str(_r.get("IS_NULLABLE") or "").upper() == "NO":
+                    try:
+                        cur.execute("ALTER TABLE cajas_herramientas MODIFY codigo VARCHAR(100) NULL")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             # --- Caja Ideal versionado (Slice 1) ---
             # Nota: ids autoincrement, singleton activa via transacción en store
             cur.execute(

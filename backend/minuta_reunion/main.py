@@ -7,6 +7,8 @@ import io
 import json
 import os
 import re
+import traceback
+from datetime import date, datetime
 
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
@@ -220,19 +222,44 @@ async def post_reunion(request: Request) -> JSONResponse:
     if body.get("titulo") or body.get("tipo") or body.get("visibilidad") or body.get("owner_email"):
         try:
             reunion = db.crear_reunion(body)
+            reunion = _sanitizar_reunion(reunion) if isinstance(reunion, dict) else reunion
             return JSONResponse({"reunion": reunion}, status_code=201)
         except ValueError as e:
             return JSONResponse({"detail": str(e)}, status_code=400)
+        except Exception as e:
+            traceback.print_exc()
+            return JSONResponse({"detail": f"Error interno al crear reunión: {e}"}, status_code=500)
     sector = str(body.get("sector") or "").strip()
     fecha = str(body.get("fecha") or "").strip()
     if not sector or not fecha:
         return JSONResponse({"detail": "sector y fecha requeridos."}, status_code=400)
     try:
-        reunion = db.obtener_o_crear_reunion(sector, fecha)
+        if hasattr(db, "obtener_o_crear_reunion"):
+            reunion = db.obtener_o_crear_reunion(sector, fecha)
+        else:
+            # Fallback: buscar existente o crear una nueva con esos sector/fecha
+            reuniones = db.listar_reuniones(sector=sector, limite=50)
+            reunion = next((r for r in reuniones if str(r.get("fecha"))[:10] == fecha[:10]), None)
+            if not reunion:
+                reunion = db.crear_reunion({"sector": sector, "fecha": fecha, "titulo": f"Reunión {fecha}"})
+        reunion = _sanitizar_reunion(reunion) if isinstance(reunion, dict) else reunion
         return JSONResponse({"reunion": reunion})
-    except Exception as e:
+    except ValueError as e:
         return JSONResponse({"detail": str(e)}, status_code=400)
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse({"detail": str(e)}, status_code=500)
 
+
+def _sanitizar_reunion(obj: dict) -> dict:
+    """Asegura que date/datetime no rompan JSONResponse (defensa extra si DB devuelve date)."""
+    out = {}
+    for k, v in obj.items():
+        if isinstance(v, (date, datetime)):
+            out[k] = v.isoformat()
+        else:
+            out[k] = v
+    return out
 
 async def patch_reunion(request: Request) -> JSONResponse:
     reunion_id = int(request.path_params["id"])
@@ -244,9 +271,17 @@ async def patch_reunion(request: Request) -> JSONResponse:
         reunion = db.actualizar_reunion(reunion_id, body)
     except ValueError as e:
         return JSONResponse({"detail": str(e)}, status_code=400)
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse({"detail": f"Error interno al actualizar reunión: {e}"}, status_code=500)
     if not reunion:
         return JSONResponse({"detail": "Reunión no encontrada."}, status_code=404)
-    return JSONResponse({"reunion": reunion})
+    try:
+        reunion = _sanitizar_reunion(reunion)
+        return JSONResponse({"reunion": reunion})
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse({"detail": f"Error serializando reunión: {e}"}, status_code=500)
 
 
 async def delete_reunion(request: Request) -> JSONResponse:

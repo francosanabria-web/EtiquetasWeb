@@ -25,9 +25,14 @@ def _coerce_null(val: Any) -> Any:
     return val
 
 
-def _normalizar_codigo(codigo: str) -> str:
-    """Aplica UPPER(TRIM(codigo))."""
-    return codigo.strip().upper()
+def _normalizar_codigo(codigo: str | None) -> str | None:
+    """Aplica UPPER(TRIM(codigo)). Retorna None si vacio/None (permite sin codigo)."""
+    if codigo is None:
+        return None
+    s = str(codigo).strip()
+    if s == "":
+        return None
+    return s.upper()
 
 
 # --------------------------------------------------------------------------- #
@@ -287,7 +292,7 @@ def listar_herramientas(
 
             data_sql = (
                 f"SELECT id, codigo, descripcion, categoria, unidad, articulo_codigo "
-                f"FROM cajas_herramientas{where} ORDER BY codigo ASC LIMIT %s OFFSET %s"
+                f"FROM cajas_herramientas{where} ORDER BY COALESCE(codigo, 'ZZZ') ASC LIMIT %s OFFSET %s"
             )
             cur.execute(data_sql, params + [limit, offset])
             rows = cur.fetchall()
@@ -332,14 +337,15 @@ def obtener_herramienta(herramienta_id: int) -> dict[str, Any] | None:
 
 
 def crear_herramienta(data: dict[str, Any]) -> dict[str, Any]:
-    codigo = _normalizar_codigo(str(data.get("codigo") or ""))
-    if not codigo:
-        raise ValueError("El codigo es obligatorio.")
-
+    codigo = _normalizar_codigo(data.get("codigo"))
+    # codigo ahora opcional: permite NULL para inventario base sin codigo
     descripcion = _coerce_null(data.get("descripcion"))
     # DB schema requires descripcion NOT NULL, use empty string if None
     if descripcion is None:
         descripcion = ""
+    # Si no hay codigo, exigir descripcion para poder identificar la herramienta
+    if codigo is None and not descripcion.strip():
+        raise ValueError("Se requiere codigo o descripcion para crear herramienta.")
     categoria = str(data.get("categoria") or "HERRAMIENTA").strip()
     unidad = str(data.get("unidad") or "UND").strip()
     articulo_codigo = _coerce_null(data.get("articulo_codigo"))
@@ -351,12 +357,13 @@ def crear_herramienta(data: dict[str, Any]) -> dict[str, Any]:
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id FROM cajas_herramientas WHERE codigo = %s", (codigo,)
-            )
-            existing = cur.fetchone()
-            if existing:
-                raise ValueError(f"Ya existe una herramienta con el codigo '{codigo}'.")
+            if codigo is not None:
+                cur.execute(
+                    "SELECT id FROM cajas_herramientas WHERE codigo = %s", (codigo,)
+                )
+                existing = cur.fetchone()
+                if existing:
+                    raise ValueError(f"Ya existe una herramienta con el codigo '{codigo}'.")
 
             cur.execute(
                 """INSERT INTO cajas_herramientas (codigo, descripcion, categoria, unidad, articulo_codigo)
@@ -399,16 +406,16 @@ def actualizar_herramienta(herramienta_id: int, data: dict[str, Any]) -> dict[st
             params: list[Any] = []
 
             if "codigo" in data:
-                codigo = _normalizar_codigo(str(data["codigo"]))
-                if not codigo:
-                    raise ValueError("El codigo no puede estar vacio.")
-                cur.execute(
-                    "SELECT id FROM cajas_herramientas WHERE codigo = %s AND id != %s",
-                    (codigo, herramienta_id),
-                )
-                dup = cur.fetchone()
-                if dup:
-                    raise ValueError(f"Ya existe otra herramienta con el codigo '{codigo}'.")
+                codigo = _normalizar_codigo(data["codigo"])
+                # Permitir poner codigo en NULL (quitar codigo) o actualizar a valor
+                if codigo is not None:
+                    cur.execute(
+                        "SELECT id FROM cajas_herramientas WHERE codigo = %s AND id != %s",
+                        (codigo, herramienta_id),
+                    )
+                    dup = cur.fetchone()
+                    if dup:
+                        raise ValueError(f"Ya existe otra herramienta con el codigo '{codigo}'.")
                 updates.append("codigo = %s")
                 params.append(codigo)
 
@@ -492,6 +499,84 @@ def eliminar_herramienta(herramienta_id: int) -> dict[str, Any] | None:
         raise ValueError(f"No se puede eliminar: restriccion FK - {e}")
     finally:
         conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# Recomendacion codigo maestro_stock por descripcion (base sin codigo)
+# --------------------------------------------------------------------------- #
+def recomendar_codigo_por_descripcion(
+    *,
+    descripcion: str,
+    limit: int = 5,
+) -> dict[str, Any]:
+    """Recomienda codigos de maestro_stock comparando descripcion (LIKE + ranking simple).
+
+    Busca en maestro_stock donde descripcion o alias LIKE %palabra% y rankea por coincidencia.
+    Retorna {items: [{codigo, descripcion, alias, score}], total}.
+    Si no hay maestro_stock o descripcion vacia, retorna vacio.
+    """
+    desc = str(descripcion or "").strip()
+    if not desc:
+        return {"items": [], "total": 0}
+    limit = _clamp_limit(limit, default=5)
+    # Tokenizar palabras > 2 chars para LIKE
+    palabras = [p for p in desc.upper().split() if len(p) >= 3]
+    if not palabras:
+        palabras = [desc.upper().strip()]
+    # Construir WHERE con OR LIKE para cada palabra
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            # Verificar tabla existe
+            try:
+                cur.execute("SELECT 1 FROM maestro_stock LIMIT 1")
+            except Exception:
+                return {"items": [], "total": 0, "mensaje": "maestro_stock no disponible"}
+            # Construir query con scoring simple: cuantas palabras coinciden
+            where_parts = []
+            params: list[Any] = []
+            for p in palabras[:4]:  # max 4 palabras para no explotar
+                like = f"%{p}%"
+                where_parts.append("(UPPER(descripcion) LIKE %s OR UPPER(COALESCE(alias,'')) LIKE %s)")
+                params.extend([like, like])
+            where = " OR ".join(where_parts) if where_parts else "UPPER(descripcion) LIKE %s"
+            if not where_parts:
+                params = [f"%{desc.upper()}%"]
+            # Scoring: COUNT coincidencias + longitud score
+            # Usamos CASE WHEN para score
+            score_cases = []
+            score_params: list[Any] = []
+            for p in palabras[:4]:
+                like = f"%{p}%"
+                score_cases.append("CASE WHEN UPPER(descripcion) LIKE %s THEN 1 ELSE 0 END")
+                score_params.append(like)
+                score_cases.append("CASE WHEN UPPER(COALESCE(alias,'')) LIKE %s THEN 1 ELSE 0 END")
+                score_params.append(like)
+            score_expr = " + ".join(score_cases) if score_cases else "0"
+            sql = f"""
+                SELECT codigo, descripcion, alias, ({score_expr}) AS score
+                FROM maestro_stock
+                WHERE ({where}) AND activo = 1
+                ORDER BY score DESC, descripcion ASC
+                LIMIT %s
+            """
+            cur.execute(sql, score_params + params + [limit])
+            rows = cur.fetchall()
+            items = []
+            for r in rows:
+                items.append({
+                    "codigo": r["codigo"],
+                    "descripcion": r["descripcion"],
+                    "alias": r.get("alias"),
+                    "score": int(r.get("score") or 0),
+                })
+            return {"items": items, "total": len(items), "query": desc}
+    finally:
+        try:
+            if conn.open:
+                conn.close()
+        except Exception:
+            pass
 
 
 # --------------------------------------------------------------------------- #
@@ -848,10 +933,16 @@ def crear_inventario_txn(data: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(detalle, list) or len(detalle) == 0:
         raise ValueError("detalle must contain at least one item.")
 
-    # Validar cada item del detalle
+    # Validar cada item del detalle — permite sin codigo si hay descripcion (base inicial)
     for i, item in enumerate(detalle):
-        if not item.get("herramienta_codigo"):
-            raise ValueError(f"detalle[{i}]: herramienta_codigo es obligatorio.")
+        raw_codigo = _coerce_null(item.get("herramienta_codigo"))
+        raw_desc = _coerce_null(item.get("descripcion") or item.get("herramienta_descripcion") or item.get("desc"))
+        codigo_norm = _normalizar_codigo(raw_codigo) if raw_codigo is not None else None
+        if codigo_norm is None and raw_desc is None:
+            raise ValueError(f"detalle[{i}]: se requiere herramienta_codigo o descripcion.")
+        # Si hay codigo lo validamos, si no hay codigo validamos que descripcion no sea vacia
+        if codigo_norm is None and raw_desc is not None and not str(raw_desc).strip():
+            raise ValueError(f"detalle[{i}]: descripcion no puede estar vacia cuando no hay codigo.")
         cantidad = item.get("cantidad")
         if not isinstance(cantidad, (int, float)) or cantidad <= 0:
             raise ValueError(f"detalle[{i}]: cantidad must be integer > 0.")
@@ -907,17 +998,46 @@ def crear_inventario_txn(data: dict[str, Any]) -> dict[str, Any]:
             )
             inventario_id = cur.lastrowid
 
-            # Insertar detalle — buscar herramienta_id desde herramienta_codigo
+            # Insertar detalle — buscar o crear herramienta_id desde herramienta_codigo o descripcion
             for i, item in enumerate(detalle):
-                cur.execute(
-                    "SELECT id FROM cajas_herramientas WHERE codigo = %s",
-                    (item["herramienta_codigo"],),
-                )
-                ht_row = cur.fetchone()
-                if not ht_row:
-                    conn.rollback()
-                    raise ValueError(f"detalle[{i}]: herramienta_codigo '{item['herramienta_codigo']}' no existe.")
-                herramienta_id = ht_row["id"]
+                raw_codigo = _coerce_null(item.get("herramienta_codigo"))
+                raw_desc = _coerce_null(item.get("descripcion") or item.get("herramienta_descripcion") or item.get("desc"))
+                codigo_norm = _normalizar_codigo(raw_codigo) if raw_codigo is not None else None
+                herramienta_id = None
+                if codigo_norm is not None:
+                    cur.execute(
+                        "SELECT id FROM cajas_herramientas WHERE codigo = %s",
+                        (codigo_norm,),
+                    )
+                    ht_row = cur.fetchone()
+                    if not ht_row:
+                        conn.rollback()
+                        raise ValueError(f"detalle[{i}]: herramienta_codigo '{codigo_norm}' no existe.")
+                    herramienta_id = ht_row["id"]
+                else:
+                    # Sin codigo: usar descripcion — buscar existente sin codigo con misma descripcion o crear al vuelo
+                    desc_norm = str(raw_desc).strip()
+                    # Buscar herramienta existente sin codigo y misma descripcion (case-insensitive)
+                    cur.execute(
+                        "SELECT id FROM cajas_herramientas WHERE codigo IS NULL AND UPPER(TRIM(descripcion)) = UPPER(TRIM(%s)) LIMIT 1",
+                        (desc_norm,),
+                    )
+                    ht_row = cur.fetchone()
+                    if ht_row:
+                        herramienta_id = ht_row["id"]
+                    else:
+                        # Crear herramienta pendiente de codificar
+                        cat = str(item.get("categoria") or "HERRAMIENTA").strip() or "HERRAMIENTA"
+                        uni = str(item.get("unidad") or "UND").strip() or "UND"
+                        # Validar categoria permitida
+                        if cat not in ("HERRAMIENTA", "REPUESTO", "ACCESORIO", "MEDIDA", "OTRO"):
+                            cat = "HERRAMIENTA"
+                        cur.execute(
+                            """INSERT INTO cajas_herramientas (codigo, descripcion, categoria, unidad, articulo_codigo)
+                               VALUES (NULL, %s, %s, %s, NULL)""",
+                            (desc_norm, cat, uni),
+                        )
+                        herramienta_id = cur.lastrowid
                 cur.execute(
                     """INSERT INTO cajas_inventario_detalle
                        (inventario_id, herramienta_id, nro_item, cantidad, estado, presente, observaciones)
@@ -983,15 +1103,17 @@ def obtener_inventario(inventario_id: int) -> dict[str, Any] | None:
 
             detalle = []
             for dr in detalle_rows:
-                # Obtener codigo de herramienta
+                # Obtener codigo y descripcion de herramienta (soporta sin codigo)
                 cur.execute(
-                    "SELECT codigo FROM cajas_herramientas WHERE id = %s",
+                    "SELECT codigo, descripcion FROM cajas_herramientas WHERE id = %s",
                     (dr["herramienta_id"],),
                 )
                 ht_row = cur.fetchone()
                 detalle.append({
                     "id": dr["id"],
-                    "herramienta_codigo": ht_row["codigo"] if ht_row else str(dr["herramienta_id"]),
+                    "herramienta_codigo": ht_row["codigo"] if ht_row and ht_row.get("codigo") else "",
+                    "herramienta_descripcion": ht_row["descripcion"] if ht_row else "",
+                    "descripcion": ht_row["descripcion"] if ht_row else "",
                     "nro_item": dr["nro_item"],
                     "cantidad": dr["cantidad"],
                     "estado": dr["estado"],
@@ -1209,11 +1331,13 @@ def listar_tecnicos_cards(
     q: str = "",
     limit: int = 25,
     offset: int = 0,
+    con_inventario: bool = True,
 ) -> dict[str, Any]:
     """Lista paginada de técnicos con métricas vs Caja Ideal.
 
     Filtra personal WHERE tipo IN ('tecnico','supervisor','generico','panol') AND activo=1
     q filtra por UPPER(TRIM(nombre)) LIKE %q% OR legajo LIKE %q%.
+    Si con_inventario=True, solo retorna técnicos que ya tienen al menos un inventario en cajas_inventarios.
     Para cada técnico, obtiene último inventario (periodo DESC) y computa
     presente_count, faltantes_pct, completitud_pct, limpieza_score.
     """
@@ -1221,11 +1345,14 @@ def listar_tecnicos_cards(
     offset = _clamp_offset(offset)
     q = str(q or "").strip()
 
-    conditions = ["p.tipo IN ('tecnico','supervisor','generico','panol')", "p.activo = 1"]
+    # Solo técnicos: supervisores nunca tienen caja (pedido explícito)
+    conditions = ["p.tipo = 'tecnico'", "p.activo = 1"]
     params: list[Any] = []
     if q:
         conditions.append("(UPPER(TRIM(p.nombre)) LIKE CONCAT('%%', UPPER(TRIM(%s)), '%%') OR UPPER(TRIM(IFNULL(p.legajo,''))) LIKE CONCAT('%%', UPPER(TRIM(%s)), '%%'))")
         params.extend([q, q])
+    if con_inventario:
+        conditions.append("EXISTS (SELECT 1 FROM cajas_inventarios inv2 WHERE inv2.tecnico_id = p.id)")
 
     where = " WHERE " + " AND ".join(conditions) if conditions else ""
     conn = get_connection()
@@ -1233,6 +1360,24 @@ def listar_tecnicos_cards(
         with conn.cursor() as cur:
             cur.execute(f"SELECT COUNT(*) c FROM personal p{where}", params)
             total = int(cur.fetchone()["c"] or 0)
+            # Fallback bootstrap: si con_inventario=True pero no hay ninguno con inventario (primeros inventarios),
+            # mostrar todos los técnicos (tipo=tecnico) para permitir cargar la base.
+            if total == 0 and con_inventario:
+                # Reintentar sin filtro EXISTS (pero manteniendo solo tipo=tecnico)
+                fallback_conditions = ["p.tipo = 'tecnico'", "p.activo = 1"]
+                fallback_params: list[Any] = []
+                if q:
+                    fallback_conditions.append("(UPPER(TRIM(p.nombre)) LIKE CONCAT('%%', UPPER(TRIM(%s)), '%%') OR UPPER(TRIM(IFNULL(p.legajo,''))) LIKE CONCAT('%%', UPPER(TRIM(%s)), '%%'))")
+                    fallback_params.extend([q, q])
+                fallback_where = " WHERE " + " AND ".join(fallback_conditions) if fallback_conditions else ""
+                cur.execute(f"SELECT COUNT(*) c FROM personal p{fallback_where}", fallback_params)
+                total_fb = int(cur.fetchone()["c"] or 0)
+                if total_fb == 0:
+                    return {"items": [], "total": 0}
+                # Usar fallback para el listado
+                where = fallback_where
+                params = fallback_params
+                total = total_fb
             if total == 0:
                 return {"items": [], "total": 0}
 
@@ -1402,7 +1547,7 @@ def listar_inventarios_por_tecnico(
                 cur.execute(
                     f"""
                     SELECT d.inventario_id, d.id, d.herramienta_id, d.nro_item, d.cantidad, d.estado, d.presente, d.observaciones,
-                           h.codigo AS herramienta_codigo
+                           h.codigo AS herramienta_codigo, h.descripcion AS herramienta_descripcion
                     FROM cajas_inventario_detalle d
                     LEFT JOIN cajas_herramientas h ON h.id = d.herramienta_id
                     WHERE d.inventario_id IN ({fmt})
@@ -1427,7 +1572,9 @@ def listar_inventarios_por_tecnico(
                     detalle_map.setdefault(iid, []).append({
                         "id": dr["id"],
                         "herramienta_id": dr["herramienta_id"],
-                        "herramienta_codigo": dr["herramienta_codigo"] if dr["herramienta_codigo"] else str(dr["herramienta_id"]),
+                        "herramienta_codigo": dr["herramienta_codigo"] if dr["herramienta_codigo"] else "",
+                        "herramienta_descripcion": dr.get("herramienta_descripcion") or "",
+                        "descripcion": dr.get("herramienta_descripcion") or "",
                         "nro_item": dr["nro_item"],
                         "cantidad": cant,
                         "estado": dr["estado"],

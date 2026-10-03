@@ -4,6 +4,7 @@ import {
   IMPORTANCIAS,
   fetchPedido,
   rankImportancia,
+  upsertNovedad,
   type EstadoItem,
   type Importancia,
   type Pedido,
@@ -84,6 +85,29 @@ export default function TablaPedidosReunion({
       localStorage.setItem("minuta-alturas", JSON.stringify(alturas));
     } catch {}
   }, [alturas]);
+
+  const [viewMode, setViewMode] = useState<"tabla" | "tarjetas">(() => {
+    try {
+      const raw = localStorage.getItem(`minuta-vista-${modo}`);
+      if (raw === "tarjetas" || raw === "tabla") return raw as "tabla" | "tarjetas";
+    } catch {}
+    return "tabla";
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(`minuta-vista-${modo}`, viewMode);
+    } catch {}
+  }, [viewMode, modo]);
+
+  const contadores = useMemo(() => {
+    const total = pedidos.length;
+    const criticos = pedidos.filter((p) => p.importancia === "critico").length;
+    const urgentes = pedidos.filter((p) => p.importancia === "urgente").length;
+    const normales = pedidos.filter((p) => p.importancia === "normal").length;
+    return { total, criticos, urgentes, normales };
+  }, [pedidos]);
+
+  const [novedadExpandida, setNovedadExpandida] = useState<Record<number, boolean>>({});
 
   const visibleCount = columnasVisibles ? columnasVisibles.length : 10;
   const numCols =
@@ -175,12 +199,42 @@ export default function TablaPedidosReunion({
   return (
     <section className="minuta-section">
       <div className="minuta-section-head">
-        <h2>{modo === "activos" ? "Pedidos activos" : "Finalizados"}</h2>
-        {modo === "activos" && onAdd && (
-          <button type="button" className="btn-ghost btn-sm" onClick={onAdd}>
-            + Pedido
-          </button>
-        )}
+        <div>
+          <h2 style={{ margin: 0 }}>{modo === "activos" ? "Pedidos activos" : "Finalizados"}</h2>
+          <div className="minuta-contadores" aria-label="Contadores por importancia">
+            <span className="contador total" title="Total de pedidos en esta reunión">Total: <strong>{contadores.total}</strong></span>
+            <span className="contador critico" title="Críticos"><span className="dot critico" aria-hidden="true"></span> Críticos: <strong>{contadores.criticos}</strong></span>
+            <span className="contador urgente" title="Urgentes"><span className="dot urgente" aria-hidden="true"></span> Urgentes: <strong>{contadores.urgentes}</strong></span>
+            <span className="contador normal" title="Normales"><span className="dot normal" aria-hidden="true"></span> Normales: <strong>{contadores.normales}</strong></span>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <div className="minuta-vista-toggle" role="group" aria-label="Cambiar vista">
+            <button
+              type="button"
+              className={viewMode === "tabla" ? "active" : ""}
+              onClick={() => setViewMode("tabla")}
+              title="Vista tabla"
+              aria-pressed={viewMode === "tabla"}
+            >
+              ⊞ Tabla
+            </button>
+            <button
+              type="button"
+              className={viewMode === "tarjetas" ? "active" : ""}
+              onClick={() => setViewMode("tarjetas")}
+              title="Vista tarjetas"
+              aria-pressed={viewMode === "tarjetas"}
+            >
+              ▦ Tarjetas
+            </button>
+          </div>
+          {modo === "activos" && onAdd && (
+            <button type="button" className="btn-ghost btn-sm" onClick={onAdd}>
+              + Pedido
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="minuta-toolbar">
@@ -221,7 +275,8 @@ export default function TablaPedidosReunion({
         )}
       </div>
 
-      <div className="minuta-table-wrap">
+      {viewMode === "tabla" ? (
+        <div className="minuta-table-wrap">
         <table className="minuta-table minuta-table-pedidos">
           <thead>
             <tr>
@@ -352,7 +407,7 @@ export default function TablaPedidosReunion({
                         }}
                         title="Arrastrar para reordenar"
                       >
-                        <span className="minuta-drag-handle">⠿</span>
+                        <span className="minuta-drag-handle" aria-hidden="true">⋮⋮</span>
                       </td>
                     )}
                     {modo === "activos" && onVisto && (
@@ -586,6 +641,82 @@ export default function TablaPedidosReunion({
           </tbody>
         </table>
       </div>
+      ) : (
+        <div className="minuta-cards-grouped">
+          {filtrados.length === 0 ? (
+            <p className="minuta-empty minuta-empty-cards">
+              {modo === "activos" ? "No hay pedidos activos. Agregá uno con «+ Pedido»." : "No hay ítems finalizados."}
+            </p>
+          ) : (
+            (["critico", "urgente", "normal"] as const).map((imp) => {
+              const grupo = filtrados.filter((p) => p.importancia === imp);
+              if (grupo.length === 0) return null;
+              const titulo = imp === "critico" ? "Críticos" : imp === "urgente" ? "Urgentes" : "Normales";
+              return (
+                <section key={imp} className={`minuta-grupo-imp grupo-${imp}`}>
+                  <h3 className="minuta-grupo-titulo">
+                    <span className={`minuta-grupo-badge imp-${imp}`}>{titulo}</span>
+                    <span className="minuta-grupo-count">{grupo.length}</span>
+                  </h3>
+                  <div className="minuta-cards-grid">
+                    {grupo.map((p) => {
+                      const expandido = expandidoId === p.id;
+                      const borrador = borradores[p.id] ?? "";
+                      const visto = Boolean(vistos[p.id]);
+                      const ultimaNovedad = p.ultima_novedad && p.ultima_novedad_fecha !== fechaReunion ? p.ultima_novedad : "";
+                      const label = p.n_pedido || p.pedido || `#${p.id}`;
+                      const novExpandida = Boolean(novedadExpandida[p.id]);
+                      return (
+                        <article key={p.id} className={`minuta-pedido-card imp-${p.importancia} ${visto ? "visto" : ""}`}>
+                  <header className="minuta-card-head">
+                    <div className="minuta-card-head-top">
+                      {modo === "activos" && <span className="minuta-drag-handle card" aria-hidden="true" title="Arrastrar para reordenar">⋮⋮</span>}
+                      <span className={`minuta-importancia-badge imp-${p.importancia}`}>{p.importancia}</span>
+                              <span className={`minuta-estado-badge est-${p.estado}`}>{p.estado}</span>
+                              <span className="minuta-card-id">#{p.id}</span>
+                            </div>
+                            <strong className="minuta-card-pedido" title={p.pedido}>{p.pedido || "Sin descripción"}</strong>
+                            <span className="minuta-card-npedido">{p.n_pedido || "—"}</span>
+                          </header>
+                          <div className="minuta-card-body">
+                            {ultimaNovedad && (
+                              <div
+                                className={`minuta-card-ultima-wrap ${novExpandida ? "expandida" : ""}`}
+                                onClick={() => setNovedadExpandida((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
+                                title={novExpandida ? "Click para colapsar" : "Click para expandir"}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setNovedadExpandida((prev) => ({ ...prev, [p.id]: !prev[p.id] })); } }}
+                              >
+                                <p className="minuta-card-ultima"><strong>Última:</strong> {ultimaNovedad}</p>
+                                {!novExpandida && ultimaNovedad.length > 90 && <span className="minuta-card-ultima-more">Ver más…</span>}
+                              </div>
+                            )}
+                            <label className="minuta-card-field">
+                              <span>Consultas</span>
+                              <textarea rows={2} value={p.consultas ?? ""} onChange={(e) => onCampo(p.id, { consultas: e.target.value })} placeholder="Consultas…" />
+                            </label>
+                            <label className="minuta-card-field">
+                              <span>Novedad {fmtFecha(fechaReunion)}</span>
+                              <textarea rows={2} value={borrador} onChange={(e) => onBorrador(p.id, e.target.value)} placeholder={`Novedades del ${fmtFecha(fechaReunion)}…`} />
+                            </label>
+                          </div>
+                          <div className="minuta-card-actions">
+                            <button type="button" className="btn-ghost btn-sm" onClick={() => onExpand(expandido ? null : p.id)}>{expandido ? "▲" : "▼"} Historial</button>
+                            {modo === "activos" && onFinalizar && <button type="button" className="btn-ghost btn-sm" disabled={busyId === p.id} onClick={async () => { setBusyId(p.id); try { await onFinalizar(p.id); } finally { setBusyId(null); } }}>Finalizar</button>}
+                            <button type="button" className="btn-ghost btn-sm minuta-btn-eliminar" disabled={busyId === p.id} onClick={() => void confirmarEliminar(p.id, label)}>Eliminar</button>
+                          </div>
+                          {expandido && <div className="minuta-card-historial"><HistorialPedido pedido={p} /></div>}
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -596,6 +727,9 @@ function HistorialPedido({ pedido }: { pedido: Pedido }) {
   const [cargandoHist, setCargandoHist] = useState(
     !(pedido.novedades && pedido.novedades.length > 0),
   );
+  const [editandoId, setEditandoId] = useState<number | null>(null);
+  const [editTexto, setEditTexto] = useState("");
+  const [guardandoId, setGuardandoId] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -654,13 +788,60 @@ function HistorialPedido({ pedido }: { pedido: Pedido }) {
       )}
       {novs.length > 0 && (
         <ul className="minuta-novedades-list">
-          {novs.map((n) => (
-            <li key={n.id}>
-              <strong>Novedades del {fmtFecha(n.fecha_reunion)}</strong>
-              <span className="minuta-novedad-sector"> ({n.sector})</span>
-              <p>{n.texto}</p>
-            </li>
-          ))}
+          {novs.map((n) => {
+            const esPlaceholder = n.texto.includes("[Novedad del 15/09");
+            const enEdicion = editandoId === n.id;
+            return (
+              <li key={n.id} className={esPlaceholder ? "minuta-novedad-placeholder" : ""} style={esPlaceholder ? { background: "#fffbeb", border: "1px dashed #f59e0b", borderRadius: 8, padding: "8px 10px" } : undefined}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span>
+                    <strong>Novedades del {fmtFecha(n.fecha_reunion)}</strong>
+                    <span className="minuta-novedad-sector"> ({n.sector})</span>
+                    {esPlaceholder && <span style={{ marginLeft: 8, fontSize: "0.72rem", fontWeight: 700, background: "#f59e0b", color: "#fff", padding: "2px 6px", borderRadius: 999 }}>placeholder 15/09</span>}
+                  </span>
+                  {!enEdicion && (
+                    <button type="button" className="btn-ghost btn-sm" onClick={() => { setEditandoId(n.id); setEditTexto(n.texto === "[Novedad del 15/09 - completar]" ? "" : n.texto); }}>
+                      ✏️ Editar
+                    </button>
+                  )}
+                </div>
+                {enEdicion ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                    <textarea rows={3} value={editTexto} onChange={(e) => setEditTexto(e.target.value)} autoFocus placeholder="Escribí la novedad del 15/09…" style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--border)", fontFamily: "inherit" }} />
+                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                      <button type="button" className="btn-ghost btn-sm" disabled={guardandoId === n.id} onClick={() => { setEditandoId(null); setEditTexto(""); }}>
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-primary btn-sm"
+                        disabled={guardandoId === n.id || !editTexto.trim()}
+                        onClick={async () => {
+                          const texto = editTexto.trim();
+                          if (!texto) return;
+                          setGuardandoId(n.id);
+                          try {
+                            await upsertNovedad(pedido.id, { fecha_reunion: n.fecha_reunion, texto });
+                            setNovedades((prev) => (prev ? prev.map((x) => (x.id === n.id ? { ...x, texto } : x)) : prev));
+                            setEditandoId(null);
+                            setEditTexto("");
+                          } catch (e) {
+                            alert(e instanceof Error ? e.message : "No se pudo guardar");
+                          } finally {
+                            setGuardandoId(null);
+                          }
+                        }}
+                      >
+                        {guardandoId === n.id ? "Guardando…" : "Guardar"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p style={{ margin: "6px 0 0", whiteSpace: "pre-wrap", color: esPlaceholder ? "#92400e" : undefined, fontStyle: esPlaceholder ? "italic" : undefined }}>{n.texto}</p>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

@@ -106,8 +106,85 @@ def _expandir_emails(celda: str) -> list[str]:
     return out
 
 
+def _listar_desde_personal() -> list[Contacto] | None:
+    """Intenta leer contactos desde el módulo Personal (MariaDB panol.personal).
+
+    Retorna None si no hay DB o si falla, para que el caller haga fallback a Excel.
+    """
+    try:
+        import pymysql
+        from pymysql.cursors import DictCursor
+
+        # Reutilizar credenciales del servicio personal (mismo DB_HOST/PORT/USER/PASS/NAME)
+        import os
+
+        host = os.environ.get("DB_HOST", os.environ.get("PERSONAL_DB_HOST", "127.0.0.1"))
+        port = int(os.environ.get("DB_PORT", os.environ.get("PERSONAL_DB_PORT", "3306")))
+        user = os.environ.get("DB_USER", os.environ.get("PERSONAL_DB_USER", "root"))
+        password = os.environ.get("DB_PASSWORD", os.environ.get("PERSONAL_DB_PASSWORD", ""))
+        name = os.environ.get("DB_NAME", os.environ.get("PERSONAL_DB_NAME", "panol"))
+        conn = pymysql.connect(
+            host=host, port=port, user=user, password=password, database=name, charset="utf8mb4", cursorclass=DictCursor
+        )
+        try:
+            with conn.cursor() as cur:
+                # Personal activo con email, ordenado por nombre
+                cur.execute(
+                    """
+                    SELECT p.id, p.nombre, p.email, p.tipo, a.nombre AS area_nombre
+                    FROM personal p
+                    LEFT JOIN areas a ON a.id = p.area_id
+                    WHERE p.activo = 1 AND p.email IS NOT NULL AND TRIM(p.email) <> ''
+                    ORDER BY p.nombre ASC
+                    """
+                )
+                rows = cur.fetchall()
+                if not rows:
+                    return []
+                contactos: list[Contacto] = []
+                for r in rows:
+                    email_raw = (r.get("email") or "").strip()
+                    # Soportar múltiples emails separados por coma/punto y coma en el mismo campo
+                    for email in _expandir_emails(email_raw):
+                        nombre = (r.get("nombre") or "").strip()
+                        tipo = (r.get("tipo") or None)
+                        # Etiqueta más rica: "Nombre — Área <email>"
+                        area = (r.get("area_nombre") or "").strip()
+                        if nombre and area:
+                            etiqueta = f"{nombre} — {area} <{email}>"
+                        elif nombre:
+                            etiqueta = f"{nombre} <{email}>"
+                        else:
+                            etiqueta = email
+                        contactos.append(
+                            Contacto(
+                                id=f"personal-{r['id']}-{email}",
+                                email=email,
+                                etiqueta=etiqueta,
+                                tipo=tipo,
+                            )
+                        )
+                return contactos
+        finally:
+            try:
+                conn.close()
+            except:
+                pass
+    except Exception:
+        return None
+
+
 def listar_contactos() -> list[Contacto]:
-    filas = leer_filas_correos()
+    # 1. Intentar fuente primaria: módulo Personal (MariaDB)
+    contactos_personal = _listar_desde_personal()
+    if contactos_personal is not None and len(contactos_personal) > 0:
+        return contactos_personal
+    # 2. Fallback legacy: master_codes.xlsx hoja correos (si Personal está vacío o falla)
+    try:
+        filas = leer_filas_correos()
+    except (FileNotFoundError, ValueError):
+        # Si ni Personal ni Excel tienen datos, retornar lo que haya (vacío o personal vacío)
+        return contactos_personal if contactos_personal is not None else []
     contactos: list[Contacto] = []
     for row in filas:
         celda = row.get("destinatario", "")
@@ -126,7 +203,10 @@ def listar_contactos() -> list[Contacto]:
                     tipo=tipo,
                 )
             )
-    return contactos
+    # Si Personal devolvió lista vacía pero Excel tiene datos, usar Excel; si ambos vacíos, devolver vacío
+    if contactos and (contactos_personal is not None and len(contactos_personal) == 0):
+        return contactos
+    return contactos if contactos else (contactos_personal or [])
 
 
 def fila_smtp_excel() -> tuple[str, str] | None:

@@ -150,19 +150,26 @@ export function useMinutaSession(reunionId: number) {
     [scope, reunionId],
   );
 
-  /** Campos en cache (salvo consultas → DB inmediata). */
+  /** Campos en cache + persistencia inmediata a DB para no perder datos (fix 3 vacíos). */
   const guardarCampoPedido = useCallback(
     (id: number, patch: PedidoPatch) => {
-      if ("consultas" in patch) {
-        setPedidosRaw((list) =>
-          list.map((p) => (p.id === id ? { ...p, consultas: patch.consultas ?? "" } : p)),
-        );
+      // Optimista en UI
+      setPedidosRaw((list) =>
+        list.map((p) => (p.id === id ? { ...p, ...patch } as Pedido : p)),
+      );
+      // Consultas con debounce (ya estaba)
+      if ("consultas" in patch && Object.keys(patch).length === 1) {
         if (debounceConsultas.current[id]) clearTimeout(debounceConsultas.current[id]);
         debounceConsultas.current[id] = setTimeout(() => {
           void actualizarPedido(id, { consultas: patch.consultas }).catch(() => {});
         }, 400);
         return;
       }
+      // Para pedido/n_pedido/oc/etc. también persistir inmediato + guardar en cache por si falla
+      const patchSinConsultas = { ...patch };
+      // Si solo es consultas ya lo manejamos arriba
+      if ("consultas" in patchSinConsultas && Object.keys(patchSinConsultas).length === 1) return;
+      // Guardar en cache local por si hay error de red
       setSesion((s) => {
         const prev = s.borradoresCampos[id] ?? {};
         const next = {
@@ -172,6 +179,8 @@ export function useMinutaSession(reunionId: number) {
         guardarSesionLocal(scope, reunionId, next);
         return next;
       });
+      // Persistir a DB inmediato (sin debounce, para que el mail lo vea)
+      void actualizarPedido(id, patch).catch(() => {});
     },
     [scope, reunionId],
   );

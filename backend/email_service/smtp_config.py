@@ -34,7 +34,12 @@ def _desde_env() -> SmtpConfig | None:
 
 
 def _desde_excel_solo_lectura() -> SmtpConfig | None:
-    creds = fila_smtp_excel()
+    try:
+        creds = fila_smtp_excel()
+    except (FileNotFoundError, ValueError, OSError) as e:
+        # No romper la cadena: si Excel no está (G: no montada), cae a 503 arriba
+        print(f"[smtp_config] fallback Excel no disponible: {e}")
+        return None
     if not creds:
         return None
     remitente, password = creds

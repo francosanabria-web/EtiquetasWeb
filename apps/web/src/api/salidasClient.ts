@@ -345,6 +345,45 @@ export async function exportarDiario(fecha: string): Promise<Blob> {
   return await res.blob();
 }
 
+export type ResumenDiarioLinea = {
+  codigo: string;
+  descripcion: string;
+  cantidad: number;
+  monto: number;
+  tipo_comprobante: string;
+  numero_orden: string;
+  operario: string;
+  sector: string;
+  maquina: string;
+  fecha: string;
+};
+
+export type ResumenDiarioGroup = {
+  linea: string;
+  total: number;
+  cantidad: number;
+  items: ResumenDiarioLinea[];
+};
+
+export type ResumenDiarioResult = {
+  fecha: string;
+  grupos: ResumenDiarioGroup[];
+  total_general: number;
+  mensaje: string;
+};
+
+export async function fetchResumenDiario(fecha: string): Promise<ResumenDiarioResult> {
+  const sp = new URLSearchParams();
+  sp.set("fecha", fecha);
+  const res = await fetch(`${BASE}/api/salidas/resumen-diario?${sp.toString()}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const detail = typeof (data as { detail?: string }).detail === "string" ? (data as { detail: string }).detail : `Error ${res.status}`;
+    throw new Error(detail);
+  }
+  return await res.json();
+}
+
 // ---------- Historial / Movimientos con filtros v4 ----------
 
 export type MovimientoRow = {
@@ -435,7 +474,7 @@ export function anularMovimiento(id: number, motivo: string): Promise<{ mensaje:
 
 export function editarMovimiento(
   id: number,
-  cambios: Partial<Pick<MovimientoRow, "TIPO_COMPROBANTE" | "NUMERO_ORDEN" | "MAQUINA_SITIO" | "SECTOR" | "OPERARIO" | "CANTIDAD" | "PRECIO_UNITARIO"> & {
+  cambios: Partial<Pick<MovimientoRow, "TIPO_COMPROBANTE" | "NUMERO_ORDEN" | "MAQUINA_SITIO" | "SECTOR" | "OPERARIO" | "CANTIDAD" | "PRECIO_UNITARIO" | "FECHA"> & {
     tipo_comprobante?: string;
     numero_orden?: string | number;
     maquina_sitio?: string;
@@ -443,6 +482,7 @@ export function editarMovimiento(
     operario_nombre?: string;
     cantidad?: number;
     precio_unitario?: number;
+    fecha?: string;
     motivo?: string | null;
   }>,
 ): Promise<{ mensaje: string; id: number; movimiento: MovimientoRow }> {
@@ -458,6 +498,7 @@ export function editarMovimiento(
     else if (lk === "operario" || lk === "operario_nombre") payload["operario_nombre"] = v;
     else if (lk === "cantidad") payload["cantidad"] = v;
     else if (lk === "precio_unitario" || lk === "precio unitario" || lk === "precio_unitario".toLowerCase()) payload["precio_unitario"] = v;
+    else if (lk === "fecha" || lk === "fecha_salida" || lk === "fecha") payload["fecha"] = v;
     else if (lk === "motivo" || lk === "motivo_edicion") payload["motivo"] = v;
     else payload[k] = v;
   }

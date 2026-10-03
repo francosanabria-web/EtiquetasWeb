@@ -39,13 +39,14 @@ export default function TecnicosCards({ token, refreshKey }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<TecnicoCard | null>(null);
+  const [soloConInventario, setSoloConInventario] = useState(true);
 
   const cargar = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await getTecnicosCards(token, { limit: PAGE_SIZE, offset, q: q || undefined });
+      const data = await getTecnicosCards(token, { limit: PAGE_SIZE, offset, q: q || undefined, con_inventario: soloConInventario });
       setItems(data.items);
       setTotal(data.total);
     } catch (e) {
@@ -53,7 +54,7 @@ export default function TecnicosCards({ token, refreshKey }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [token, offset, q]);
+  }, [token, offset, q, soloConInventario]);
 
   useEffect(() => {
     void cargar();
@@ -94,6 +95,15 @@ export default function TecnicosCards({ token, refreshKey }: Props) {
           onChange={(e) => setQInput(e.target.value)}
           placeholder="Buscar por nombre o legajo…"
         />
+      </label>
+
+      <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem", cursor: "pointer" }}>
+        <input
+          type="checkbox"
+          checked={soloConInventario}
+          onChange={(e) => { setSoloConInventario(e.target.checked); setOffset(0); }}
+        />
+        Solo técnicos con inventario
       </label>
 
       {loading && (

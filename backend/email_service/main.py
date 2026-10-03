@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import smtplib
+import traceback
 from pathlib import Path
 
 from starlette.applications import Starlette
@@ -77,7 +78,14 @@ async def post_send(request: Request) -> JSONResponse:
     except ValueError as e:
         return JSONResponse({"detail": str(e)}, status_code=400)
     except smtplib.SMTPException as e:
+        traceback.print_exc()
         return JSONResponse({"detail": f"Error SMTP: {e}"}, status_code=502)
+    except (OSError, TimeoutError, ConnectionError) as e:
+        traceback.print_exc()
+        return JSONResponse({"detail": f"Error de conexión SMTP: {e}"}, status_code=502)
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse({"detail": f"Error interno: {e}"}, status_code=500)
 
     return JSONResponse(
         {"ok": True, "mensaje": "Correo enviado correctamente.", "destinatarios": dest}

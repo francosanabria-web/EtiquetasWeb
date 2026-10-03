@@ -326,6 +326,17 @@ async def patch_asignacion_cerrar(request: Request) -> JSONResponse:
     return JSONResponse(result)
 
 
+async def get_recomendar_codigo(request: Request) -> JSONResponse:
+    result = service.get_recomendacion_codigo(_token(request), dict(request.query_params))
+    if isinstance(result, tuple):
+        msg, status = result
+        # msg puede ser dict con detail
+        if isinstance(msg, dict):
+            return JSONResponse(msg, status_code=status)
+        return JSONResponse({"detail": msg}, status_code=status)
+    return JSONResponse(result)
+
+
 app = Starlette(
     routes=[
         Route("/health", health, methods=["GET"]),
@@ -334,6 +345,7 @@ app = Starlette(
         Route("/api/cajas/cajas", post_caja, methods=["POST"]),
         Route("/api/cajas/cajas/{id:int}", patch_caja, methods=["PATCH"]),
         Route("/api/cajas/cajas/{id:int}", delete_caja, methods=["DELETE"]),
+        Route("/api/cajas/herramientas/recomendar-codigo", get_recomendar_codigo, methods=["GET"]),
         Route("/api/cajas/herramientas", get_herramientas, methods=["GET"]),
         Route("/api/cajas/herramientas/{id:int}", get_herramienta_by_id, methods=["GET"]),
         Route("/api/cajas/herramientas", post_herramienta, methods=["POST"]),
