@@ -36,6 +36,19 @@ from mail_jobs import (
 from service import export_csv, export_xlsx, listar_movimientos, opciones_filtros, resumen_movimientos
 from store import CargandoDatosError, RedNoDisponibleError, ReportesStore
 
+
+def _run_activos_manual(fecha, destinatarios):
+    """Carga lazy de backend/activos para no tumbar reportes si falta el path."""
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    base = _Path(__file__).resolve().parent.parent / "activos"
+    if str(base) not in _sys.path:
+        _sys.path.insert(0, str(base))
+    from mail_activos import run_activos_si_habilitado as _run
+
+    return _run(fecha, destinatarios=destinatarios, forzar=True)
+
 log = logging.getLogger("reportes")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -220,6 +233,78 @@ async def post_mail_mensual(request: Request) -> JSONResponse:
     return await _run_json(work)
 
 
+async def post_mail_manual(request: Request) -> JSONResponse:
+    """Envía manual: diario o activos. Body: {fecha?, tipo, destinatarios[], forzar?}."""
+    import json as _json
+    from urllib.parse import parse_qs
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "CUERPO_JSON_INVALIDO"}, status_code=400)
+
+    fecha_str: str | None = body.get("fecha")
+    tipo: str | None = body.get("tipo")
+    destinatarios_raw: list[str] | None = body.get("destinatarios")
+    forzar: bool = body.get("forzar", True)
+
+    # Validación: tipo obligatorio
+    if not tipo or tipo not in ("diario", "activos"):
+        return JSONResponse(
+            {"detail": "PARAMETRO_TIPO_INVALIDO: use 'diario' o 'activos'."},
+            status_code=400,
+        )
+
+    # Validación: destinatarios obligatorio, no vacío, con @, strip, dedup case-insensitive
+    if not destinatarios_raw:
+        return JSONResponse(
+            {"detail": "FALTAN_DESTINATARIOS: el campo 'destinatarios' es requerido y no puede estar vacío."},
+            status_code=400,
+        )
+
+    # Normalizar: strip, validar @, dedup case-insensitive
+    dest_limpios: list[str] = []
+    seen_lower: set[str] = set()
+    for d in destinatarios_raw:
+        d = d.strip()
+        if not d or "@" not in d:
+            continue
+        dl = d.lower()
+        if dl not in seen_lower:
+            seen_lower.add(dl)
+            dest_limpios.append(d)
+
+    if not dest_limpios:
+        return JSONResponse(
+            {"detail": "FALTAN_DESTINATARIOS: ningun destinatario válido después de filtrar."},
+            status_code=400,
+        )
+
+    # Fechas: default ayer si no se informa
+    if fecha_str:
+        try:
+            from datetime import date as _date
+            fecha = _date.fromisoformat(fecha_str)
+        except Exception:
+            return JSONResponse(
+                {"detail": "PARAMETRO_FECHA_INVALIDO: formato YYYY-MM-DD inválido."},
+                status_code=400,
+            )
+    else:
+        from datetime import date, timedelta as _timedelta
+        fecha = date.today() - _timedelta(days=1)
+
+    def work() -> dict:
+        if tipo == "diario":
+            return run_diario_si_habilitado(fecha, destinatarios=dest_limpios, forzar=True)
+        elif tipo == "activos":
+            return _run_activos_manual(fecha, dest_limpios)
+        else:
+            raise ValueError("tipo inesperado")
+
+    return await _run_json(work)
+
+
 def _carga_inicial() -> None:
     try:
         ReportesStore.get().refresh()
@@ -265,6 +350,7 @@ routes = [
     Route("/api/reportes/mail/status", get_mail_status, methods=["GET"]),
     Route("/api/reportes/mail/diario/dry-run", post_mail_diario_dry, methods=["POST"]),
     Route("/api/reportes/mail/diario", post_mail_diario, methods=["POST"]),
+    Route("/api/reportes/mail/manual", post_mail_manual, methods=["POST"]),
     Route("/api/reportes/mail/mensual", post_mail_mensual, methods=["POST"]),
 ]
 

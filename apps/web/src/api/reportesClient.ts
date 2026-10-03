@@ -149,6 +149,26 @@ export function urlExportCsv(filtros: FiltrosQuery = {}): string {
   return `${BASE}/api/reportes/export.csv${qs(filtros)}`;
 }
 
+/** Envía mail manual al endpoint POST /api/reportes/mail/manual */
+export async function enviarMailManual(payload: {
+  fecha?: string;
+  tipo: "diario" | "activos";
+  destinatarios: string[];
+}): Promise<{ enviado: boolean; fecha?: string; filas?: number; error?: string }> {
+  return fetchJson("/api/reportes/mail/manual", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+/** URL para exportar atenciones por período y formato. */
+export function urlExportAtenciones(desde: string, hasta: string, formato: "xlsx" | "csv"): string {
+  return `${BASE}/api/salidas/atenciones/export?desde=${desde}&hasta=${hasta}&formato=${formato}`;
+}
+
 export function fmtPesos(n: number): string {
   return n.toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
 }

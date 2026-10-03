@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
+  enviarMailManual,
   fetchFiltros,
   fetchMovimientos,
   fetchResumen,
   fmtNum,
   fmtPesos,
   refreshReportes,
+  urlExportAtenciones,
   urlExportXlsx,
   type FiltrosOpciones,
   type FiltrosQuery,
   type MovimientoItem,
   type ResumenReportes,
 } from "../../api/reportesClient";
+import { kpiAtenciones } from "../../api/salidasClient";
 import "../../styles/reportes.css";
 
 const LIMITE = 100;
@@ -37,7 +40,18 @@ export default function ReportesPage() {
   const [resumen, setResumen] = useState<ResumenReportes | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [fuentePath, setFuentePath] = useState("");
+  const [tipoManual, setTipoManual] = useState<"diario" | "activos">("diario");
+  const [fechaManual, setFechaManual] = useState(() =>
+    new Date(Date.now() - 86400000).toISOString().slice(0, 10),
+  );
+  const [destsManual, setDestsManual] = useState("");
+  const [enviandoManual, setEnviandoManual] = useState(false);
+  const [resultadoManual, setResultadoManual] = useState<string | null>(null);
+  const [atDesde, setAtDesde] = useState("");
+  const [atHasta, setAtHasta] = useState("");
+  const [atFormato, setAtFormato] = useState<"xlsx" | "csv">("xlsx");
+  const [modal, setModal] = useState<null | "envio" | "atenciones">(null);
+  const [kpiAtencion, setKpiAtencion] = useState<{total: number; con_retiro: number; sin_retiro: number} | null>(null);
 
   const cargar = useCallback(async (f: FiltrosQuery, off: number) => {
     setCargando(true);
@@ -54,7 +68,6 @@ export default function ReportesPage() {
       setOffset(off);
       setResumen(res);
       if (!opciones) setOpciones(opts);
-      setFuentePath(mov.fuente?.path || res.fuente?.path || "");
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo cargar reportes.");
     } finally {
@@ -66,6 +79,34 @@ export default function ReportesPage() {
     void cargar(aplicados, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- carga inicial
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    if (atDesde && atHasta) {
+      kpiAtenciones({ desde: atDesde, hasta: atHasta })
+        .then((data) => {
+          if (mounted) {
+            const dias = Array.isArray(data.por_dia) ? data.por_dia : [];
+            if (dias.length) {
+              setKpiAtencion({
+                total: dias.reduce((a, d) => a + (Number(d.total) || 0), 0),
+                con_retiro: dias.reduce((a, d) => a + (Number(d.con_retiro) || 0), 0),
+                sin_retiro: dias.reduce((a, d) => a + (Number(d.sin_retiro) || 0), 0),
+              });
+            } else {
+              setKpiAtencion({ total: 0, con_retiro: 0, sin_retiro: 0 });
+            }
+          }
+        })
+        .catch((e) => {
+          console.error("KPI atenciones error:", e);
+          if (mounted) setKpiAtencion(null);
+        });
+    } else {
+      setKpiAtencion(null);
+    }
+    return () => { mounted = false };
+  }, [atDesde, atHasta]);
 
   function setCampo<K extends keyof FiltrosQuery>(key: K, value: FiltrosQuery[K]) {
     setFiltros((prev) => ({ ...prev, [key]: value }));
@@ -97,6 +138,39 @@ export default function ReportesPage() {
     }
   }
 
+  async function enviarManual() {
+    const dests = Array.from(
+      new Set(
+        destsManual
+          .split(/[,;\n]+/)
+          .map((d) => d.trim())
+          .filter((d) => d.includes("@")),
+      ),
+    );
+    if (!dests.length) {
+      setResultadoManual("Cargá al menos un destinatario válido.");
+      return;
+    }
+    setEnviandoManual(true);
+    setResultadoManual(null);
+    try {
+      const r = await enviarMailManual({
+        fecha: fechaManual || undefined,
+        tipo: tipoManual,
+        destinatarios: dests,
+      });
+      setResultadoManual(
+        r.enviado
+          ? `Enviado (${r.fecha || fechaManual}, ${r.filas ?? "?"} filas).`
+          : `No enviado: ${r.error || "sin movimientos"}.`,
+      );
+    } catch (e) {
+      setResultadoManual(e instanceof Error ? e.message : "No se pudo enviar.");
+    } finally {
+      setEnviandoManual(false);
+    }
+  }
+
   const pagina = Math.floor(offset / LIMITE) + 1;
   const paginas = Math.max(1, Math.ceil(total / LIMITE));
 
@@ -110,23 +184,17 @@ export default function ReportesPage() {
           <a className="btn btn-secondary" href={urlExportXlsx(aplicados)} download>
             Exportar Excel
           </a>
+          <button type="button" className="btn btn-secondary" onClick={() => setModal("envio")}>
+            Envío manual
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={() => setModal("atenciones")}>
+            Atenciones
+          </button>
           <button type="button" className="btn btn-secondary" onClick={() => void recargarArchivo()}>
             Recargar datos
           </button>
         </div>
       </header>
-
-      {fuentePath ? (
-        <p className="rep-fuente">
-          Fuente: <code>{fuentePath}</code>
-          {resumen ? (
-            <>
-              {" "}
-              — {resumen.filas.toLocaleString("es-AR")} filas · {fmtPesos(resumen.monto_total)}
-            </>
-          ) : null}
-        </p>
-      ) : null}
 
       <form className="rep-filtros" onSubmit={aplicar}>
         <label>
@@ -367,6 +435,139 @@ export default function ReportesPage() {
           </div>
         ) : null}
       </section>
+
+      {modal ? (
+        <div
+          className="rep-modal-backdrop"
+          onClick={() => {
+            if (!enviandoManual) setModal(null);
+          }}
+        >
+          <div
+            className="rep-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={modal === "envio" ? "Envío manual" : "Atenciones"}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {modal === "envio" ? (
+              <>
+                <h2>Envío manual</h2>
+                <label>
+                  Tipo
+                  <select
+                    value={tipoManual}
+                    onChange={(e) => setTipoManual(e.target.value as "diario" | "activos")}
+                  >
+                    <option value="diario">Gastos del día</option>
+                    <option value="activos">Activos fuera</option>
+                  </select>
+                </label>
+                <label>
+                  Fecha
+                  <input
+                    type="date"
+                    value={fechaManual}
+                    onChange={(e) => setFechaManual(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Destinatarios (separados por coma)
+                  <input
+                    type="text"
+                    placeholder="ej. franco@pilaresca.com.ar, alan@pilaresca.com.ar"
+                    value={destsManual}
+                    onChange={(e) => setDestsManual(e.target.value)}
+                  />
+                </label>
+                {resultadoManual ? <p className="rep-fuente">{resultadoManual}</p> : null}
+                <div className="rep-modal-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={enviandoManual}
+                    onClick={() => void enviarManual()}
+                  >
+                    {enviandoManual ? "Enviando…" : "Enviar mail"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={enviandoManual}
+                    onClick={() => setModal(null)}
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2>Atenciones</h2>
+                <label>
+                  Desde
+                  <input
+                    type="date"
+                    value={atDesde}
+                    onChange={(e) => setAtDesde(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Hasta
+                  <input
+                    type="date"
+                    value={atHasta}
+                    onChange={(e) => setAtHasta(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Formato
+                  <select
+                    value={atFormato}
+                    onChange={(e) => setAtFormato(e.target.value as "xlsx" | "csv")}
+                  >
+                    <option value="xlsx">Excel</option>
+                    <option value="csv">CSV</option>
+                  </select>
+                </label>
+                <p className="rep-fuente" aria-label="Resumen atenciones">
+                  {kpiAtencion ? (
+                    <>
+                      Total {kpiAtencion.total.toLocaleString("es-AR")} · Con retiro{" "}
+                      {kpiAtencion.con_retiro} · Sin stock {kpiAtencion.sin_retiro}
+                    </>
+                  ) : (
+                    "Elegí desde y hasta para ver el conteo."
+                  )}
+                </p>
+                <div className="rep-modal-actions">
+                  <a
+                    className="btn btn-primary"
+                    href={
+                      atDesde && atHasta
+                        ? urlExportAtenciones(atDesde, atHasta, atFormato)
+                        : undefined
+                    }
+                    download
+                    aria-disabled={!atDesde || !atHasta}
+                    onClick={(e) => {
+                      if (!atDesde || !atHasta) e.preventDefault();
+                    }}
+                  >
+                    Exportar
+                  </a>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setModal(null)}
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
