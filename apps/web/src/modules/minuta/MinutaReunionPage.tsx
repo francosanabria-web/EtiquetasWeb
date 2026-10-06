@@ -18,6 +18,7 @@ import TablaPedidosReunion from "./TablaPedidosReunion";
 import { limpiarSesionLocal } from "./types";
 import { useMinutaSession } from "./useMinutaSession";
 import VistaIndicadores from "./VistaIndicadores";
+import MinutaMailPreviewModal from "./MinutaMailPreviewModal";
 
 export default function MinutaReunionPage() {
   const { reunionId: idParam } = useParams();
@@ -61,6 +62,9 @@ export default function MinutaReunionPage() {
   const [verIndicadores, setVerIndicadores] = useState(false);
   const [exportando, setExportando] = useState(false);
   const [importandoNovedades, setImportandoNovedades] = useState(false);
+  const [mostrarPreviewMail, setMostrarPreviewMail] = useState(false);
+  const [previewMail, setPreviewMail] = useState<{asunto: string; cuerpoHtml: string; cuerpoTexto?: string} | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   // Columnas visibles para export (por defecto todas). Guardado local para no irse de ancho.
   const COLUMNAS_OPCIONES: { key: string; label: string }[] = [
     { key: "fecha", label: "Fecha solicitud" },
@@ -210,6 +214,42 @@ export default function MinutaReunionPage() {
     recargar,
     setError,
   ]);
+
+  const handleAbrirPreviewMail = useCallback(async () => {
+    if (!reunion) return;
+    setPreviewLoading(true);
+    try {
+      let novedades: { pedido_id: number; texto: string }[] = [];
+      try {
+        novedades = await fetchNovedadesReunion(reunion.sector, sesion.fecha);
+      } catch {
+        /* el mail igual lleva novedad_actual de los pedidos */
+      }
+      const mail = buildMinutaMail(
+        sesion,
+        [...pedidosActivos, ...pedidosFinalizados],
+        novedades,
+        {
+          titulo: reunion.titulo,
+          sector: reunion.sector,
+        }
+      );
+      setPreviewMail({
+        asunto: mail.asunto,
+        cuerpoHtml: mail.cuerpo_html,
+        cuerpoTexto: mail.cuerpo_texto,
+      });
+      setMostrarPreviewMail(true);
+    } catch (e) {
+      setPreviewMail({
+        asunto: "Error",
+        cuerpoHtml: "",
+        cuerpoTexto: "No se pudo generar la vista previa.",
+      });
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [reunion, sesion, pedidosActivos, pedidosFinalizados]);
 
   const abandonar = useCallback(() => {
     if (
@@ -469,11 +509,28 @@ export default function MinutaReunionPage() {
         onLimpiar={limpiarDestinatarios}
       />
 
+      <button
+        type="button"
+        className="btn-ghost btn-sm"
+        onClick={() => void handleAbrirPreviewMail()}
+        style={{ marginRight: 8 }}
+      >
+        {previewLoading ? "Cargando…" : "Vista previa / Imprimir"}
+      </button>
+
       <EnviarMinutaBar
         enviando={enviando}
         onEnviar={() => void enviar()}
         onAbandonar={abandonar}
       />
+      {mostrarPreviewMail && previewMail && (
+        <MinutaMailPreviewModal
+          asunto={previewMail.asunto}
+          cuerpoHtml={previewMail.cuerpoHtml}
+          cuerpoTexto={previewMail.cuerpoTexto}
+          onClose={() => setMostrarPreviewMail(false)}
+        />
+      )}
     </div>
   );
 }

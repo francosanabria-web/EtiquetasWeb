@@ -52,6 +52,7 @@ export default function ReportesPage() {
   const [atFormato, setAtFormato] = useState<"xlsx" | "csv">("xlsx");
   const [modal, setModal] = useState<null | "envio" | "atenciones">(null);
   const [kpiAtencion, setKpiAtencion] = useState<{total: number; con_retiro: number; sin_retiro: number} | null>(null);
+  const [previewMail, setPreviewMail] = useState<{html: string; asunto: string} | null>(null);
 
   const cargar = useCallback(async (f: FiltrosQuery, off: number) => {
     setCargando(true);
@@ -453,6 +454,79 @@ export default function ReportesPage() {
             {modal === "envio" ? (
               <>
                 <h2>Envío manual</h2>
+                {previewMail ? (
+                  <>
+                    <div className="rep-fuente" style={{ marginBottom: 12, padding: 8, background: "#f0f4f8", borderRadius: 6 }}>
+                      <h4>Vista previa HTML</h4>
+                      <iframe
+                        srcDoc={previewMail.html}
+                        style={{
+                          width: "100%",
+                          height: 300,
+                          border: "1px solid var(--border)",
+                          borderRadius: 8,
+                          background: "#fff",
+                          fontFamily: "inherit",
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ marginTop: 8, marginRight: 8 }}
+                        onClick={() => {
+                          const w = window.open(
+                            "",
+                            "_blank",
+                            "width=900,height=700,scrollbars=yes,resizable=yes",
+                          );
+                          if (!w) return;
+                          const asunto =
+                            previewMail.asunto.replace(
+                              /[<>&"]/g,
+                              (c): string => {
+                                switch (c) {
+                                  case "<":
+                                    return "<";
+                                  case ">":
+                                    return ">";
+                                  case "&":
+                                    return "&";
+                                  case '"':
+                                    return '"';
+                                  default:
+                                    return c;
+                                }
+                              },
+                            );
+                          w.document.write(
+                            `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${asunto}</title>
+<style>@page{margin:12mm}body{margin:0;padding:12px}</style></head>
+<body>${previewMail.html}</body></html>`,
+                          );
+                          w.document.close();
+                          w.focus();
+                          w.onload = () => {
+                            w.print();
+                          };
+                        }}
+                      >
+                        🖨️ Imprimir / PDF
+                      </button>
+                      <div style={{ marginTop: 8, fontSize: "0.85rem", color: "var(--muted)" }}>
+                        {previewMail.asunto}
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-link"
+                        style={{ marginLeft: 8, textDecoration: "underline", fontSize: "0.85rem" }}
+                        onClick={() => setPreviewMail(null)}
+                      >
+                        Ocultar preview
+                      </button>
+                    </div>
+                  </>
+                ) : null}
                 <label>
                   Tipo
                   <select
@@ -484,12 +558,65 @@ export default function ReportesPage() {
                 <div className="rep-modal-actions">
                   <button
                     type="button"
+                    className="btn btn-secondary"
+                    disabled={enviandoManual}
+                    onClick={async () => {
+                      const tipo = tipoManual as "diario" | "activos";
+                      let html: string | null = null;
+                      let asunto: string = "";
+
+                      if (tipo === "diario") {
+                        try {
+                          const r = await fetch(
+                            `/api/reportes/mail/diario/dry-run`,
+                            { method: "POST" }
+                          );
+                          const data = await r.json();
+                          if (data?.cuerpo_html_completo) {
+                            html = data.cuerpo_html_completo;
+                            asunto = data.asunto || "Reporte Diario — PREVIEW";
+                          } else {
+                            setResultadoManual("Vista previa incompleta del servidor.");
+                          }
+                        } catch (e) {
+                          setResultadoManual(
+                            "No se pudo obtener vista previa. " +
+                              (e instanceof Error ? e.message : "error desconocido")
+                          );
+                        }
+                      } else {
+                        setResultadoManual(
+                          "Vista previa no disponible para tipo 'Activos'. Solo disponible para Diario."
+                        );
+                      }
+
+                      if (html) {
+                        setPreviewMail({ html, asunto });
+                      }
+                    }}
+                  >
+                    👁️ Vista previa HTML
+                  </button>
+                  <button
+                    type="button"
                     className="btn btn-primary"
                     disabled={enviandoManual}
                     onClick={() => void enviarManual()}
                   >
                     {enviandoManual ? "Enviando…" : "Enviar mail"}
                   </button>
+                  {previewMail ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-link"
+                        style={{ marginLeft: 8, textDecoration: "underline" }}
+                        onClick={() => setPreviewMail(null)}
+                      >
+                        Ocultar preview
+                      </button>
+                    </>
+                  ) : null}
                   <button
                     type="button"
                     className="btn btn-secondary"

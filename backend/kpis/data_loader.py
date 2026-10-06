@@ -116,8 +116,8 @@ def _load_movimientos_from_db() -> pd.DataFrame:
             df["MES"] = df["mes"].astype(str).str.strip()
             df["AÑO"] = df["anio"].astype(str).str.strip()
             # Campo string fields
-            for col in ("CODIGO", "DESCRIPCION", "UBICACION", "TIPO_COMPROBANTE",
-                        "NUMERO_ORDEN", "MAQUINA_SITIO", "OPERARIO", "SECTOR"):
+            for col in ("codigo", "descripcion", "ubicacion", "tipo_comprobante",
+                        "numero_orden", "maquina_sitio", "operario", "sector"):
                 df[col] = df[col].astype(str).str.strip().str.upper().replace({"NAN": "", "NONE": "", "NAT": ""})
             # Numeric fields
             df["CANTIDAD"] = pd.to_numeric(df["cantidad"], errors="coerce").fillna(0.0)
@@ -126,7 +126,7 @@ def _load_movimientos_from_db() -> pd.DataFrame:
             # SECTOR_CALC from DB sector_nombre directly
             df["SECTOR_CALC"] = df["sector"].str.upper()
             # LINEA from tipo_comprobante
-            df["LINEA"] = df["TIPO_COMPROBANTE"].apply(normalizar_linea_gasto)
+            df["LINEA"] = df["tipo_comprobante"].apply(normalizar_linea_gasto)
             # Ensure FECHA is datetime64
             df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce")
             return df
@@ -179,8 +179,8 @@ def _load_activos_from_db() -> pd.DataFrame:
                 df["DIAS_FUERA"] = pd.to_numeric(df["DIAS_FUERA"], errors="coerce").fillna(0).astype(int)
             else:
                 df["DIAS_FUERA"] = 0
-            if "SECTOR" in df.columns:
-                df["SECTOR"] = df["SECTOR"].astype(str).str.strip().str.upper().replace({"NAN": "", "NONE": ""})
+            if "sector" in df.columns:
+                df["sector"] = df["sector"].astype(str).strip().str.upper().replace({"NAN": "", "NONE": ""})
             # ESTADO ya viene como fuera_de_planta / ingresado_a_planta en DB
             df["ESTADO"] = df["ESTADO"].astype(str).str.strip().str.upper()
             # _pendiente: fuera_de_planta == FUERA_DE_PLANTA
@@ -190,7 +190,7 @@ def _load_activos_from_db() -> pd.DataFrame:
                         "NRO_SERIE", "PROVEEDOR", "ESTADO_AL_INGRESO", "OBSERVACIONES"]:
                 if col not in df.columns:
                     df[col] = ""
-                df[col] = df[col].astype(str).str.strip().replace({"nan": "", "None": "", "NaT": ""})
+                df[col] = df[col].astype(str).strip().replace({"nan": "", "None": "", "NaT": ""})
             # FECHA_SALIDA / FECHA_REGRESO como datetime para compatibilidad
             df["FECHA_SALIDA"] = pd.to_datetime(df["FECHA_SALIDA"], errors="coerce")
             df["FECHA_REGRESO"] = pd.to_datetime(df["FECHA_REGRESO"], errors="coerce")
