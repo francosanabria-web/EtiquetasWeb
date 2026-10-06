@@ -813,8 +813,8 @@ def _process_single_file(filename: str, content: bytes) -> dict[str, Any]:
                         _fs_res = _fb.sync_stock_bulk_to_firestore(_fs_items)
                         firestore_pushed = int(_fs_res.get("pushed") or 0)
                         firestore_errors = int(_fs_res.get("errors") or 0)
-                        if _fs_res.get("error"):
-                            reporte_lines.append(f"  >> FIRESTORE: {firestore_pushed} pusheados, {firestore_errors} errores ({len(_fs_items)} cambiados) — {_fs_res.get('error')}")
+                        if _fs_res.get("error") or firestore_errors:
+                            reporte_lines.append(f"  >> FIRESTORE: {firestore_pushed} pusheados, {firestore_errors} errores ({len(_fs_items)} cambiados) — {_fs_res.get('error') or 'ver errores por doc'}")
                         else:
                             reporte_lines.append(f"  >> FIRESTORE: {firestore_pushed} artículos sincronizados al buscador ({len(_fs_items)} cambiados)")
                     except Exception as _fe:
