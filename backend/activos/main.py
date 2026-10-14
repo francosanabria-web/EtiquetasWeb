@@ -48,7 +48,9 @@ async def _run_json(work: Callable[[], dict], *, ok_status: int = 200) -> JSONRe
     except TimeoutError as e:
         return _err(e, 409)
     except PermissionError as e:
-        return _err(e, 409)
+        # Errores de autorizacion (permisos/sector) -> 403 Forbidden.
+        # Antes mapeaba a 409 (conflicto); 409 queda solo para TimeoutError.
+        return _err(e, 403)
     except ValueError as e:
         return _err(e, 400)
     except Exception as e:
