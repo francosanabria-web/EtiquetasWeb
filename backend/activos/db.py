@@ -115,19 +115,20 @@ CREATE TABLE IF NOT EXISTS `salida_activos_fotos` (
 """
 
 # Nuevas columnas de salida_activos en v2: (nombre, definicion SQL completa).
+# NOTE: estado_aprobacion ya no se usa en la lógica nueva; se deja como columna
+# legacy para compatibilidad hacia atrás, pero la lógica de aprobación fue
+# reemplazada por auditoría admin-only (salida_activos_auditoria).
+# Documenta en v2 sql fix-forward: no DROP en prod sin backup.
 _ACTIVOS_V2_COLUMNS: tuple[tuple[str, str], ...] = (
-    (
-        "estado_aprobacion",
-        "ADD COLUMN `estado_aprobacion` enum('pendiente','aprobado') NOT NULL DEFAULT 'pendiente'",
-    ),
+    # estado_aprobacion left as legacy - no longer used in business logic
+    # ("estado_aprobacion", "ADD COLUMN `estado_aprobacion` enum('pendiente','aprobado') NOT NULL DEFAULT 'pendiente'"),
     (
         "encargado_salida_id",
         "ADD COLUMN `encargado_salida_id` int(11) DEFAULT NULL",
     ),
-    ("aprobado_por", "ADD COLUMN `aprobado_por` int(11) DEFAULT NULL"),
-    ("aprobado_en", "ADD COLUMN `aprobado_en` datetime DEFAULT NULL"),
     ("usuario_creador_id", "ADD COLUMN `usuario_creador_id` int(11) DEFAULT NULL"),
-    ("usuario_ur", "ADD COLUMN `usuario_ur` int(11) DEFAULT NULL"),
+    ("usuario_regreso_id", "ADD COLUMN `usuario_regreso_id` int(11) DEFAULT NULL"),
+    ("regresado_en", "ADD COLUMN `regresado_en` datetime DEFAULT NULL"),
 )
 
 
@@ -179,20 +180,22 @@ def apply_migration_v2(conn: pymysql.connections.Connection | None = None) -> No
                 if not _column_exists(cur, "salida_activos", col_name):
                     cur.execute(f"ALTER TABLE `salida_activos` {col_def}")
 
-            # 3) Backfill historico SOLO en la primera aplicacion (cuando
-            # la columna acaba de crearse): marca filas preexistentes como
-            # aprobadas para no inundar de 'pendiente' tras el deploy.
-            if not estado_col_existed and _column_exists(cur, "salida_activos", "estado_aprobacion"):
-                cur.execute(
-                    "UPDATE `salida_activos` SET `estado_aprobacion` = 'aprobado' "
-                    "WHERE `estado_aprobacion` = 'pendiente'"
-                )
+            # 3) Ya no hay backfill de estado_aprobacion: la lógica de aprobación fue
+            # reemplazada por auditoría admin-only (salida_activos_auditoria).
+            # Solo aseguramos que las nuevas columnas existan (idempotente).
 
-            # 4) Indice para consultas por estado de aprobacion.
-            if not _index_exists(cur, "salida_activos", "idx_activos_estado_aprob"):
+            # 4) Indice para consultas por sector y regreso.
+            if not _index_exists(cur, "salida_activos", "idx_activos_sector"):
                 cur.execute(
                     "ALTER TABLE `salida_activos` "
-                    "ADD KEY `idx_activos_estado_aprob` (`estado_aprobacion`)"
+                    "ADD KEY `idx_activos_sector` (`sector`)"
+                )
+
+            # 5) Indice para consultas por usuario de creación.
+            if not _index_exists(cur, "salida_activos", "idx_activos_creador"):
+                cur.execute(
+                    "ALTER TABLE `salida_activos` "
+                    "ADD KEY `idx_activos_creador` (`usuario_creador_id`)"
                 )
 
             # 5) FK al encargado (personal). Si personal no existe aun,
@@ -213,6 +216,26 @@ def apply_migration_v2(conn: pymysql.connections.Connection | None = None) -> No
                     "ADD CONSTRAINT `fk_activos_encargado` "
                     "FOREIGN KEY (`encargado_salida_id`) REFERENCES `personal` (`id`)"
                 )
+
+            # 6) Tabla de auditoría para eventos de regreso y creación
+            # (id, activo_id, accion, usuario_id, antes/después JSON, creado_en, idx)
+            # Idempotente: solo se crea si no existe.
+            cur.execute (
+                """
+                CREATE TABLE IF NOT EXISTS `salida_activos_auditoria` (
+                    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+                    `activo_id` bigint(20) unsigned NOT NULL COMMENT 'FK salida_activos(id)',
+                    `accion` enum('crear','marcar_regreso') NOT NULL COMMENT 'Tipo de evento',
+                    `usuario_id` int(11) NOT NULL COMMENT 'Quien ejecuto la accion',
+                    `antes_despues` json NOT NULL COMMENT 'JSON con valores antes y despues',
+                    `creado_en` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`id`),
+                    KEY `idx_auditoria_activo` (`activo_id`),
+                    KEY `idx_auditoria_accion` (`accion`),
+                    KEY `idx_auditoria_fecha` (`creado_en`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
 
         conn.commit()
     finally:

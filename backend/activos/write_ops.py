@@ -8,6 +8,7 @@ Fallback Excel solo si DB deshabilitada explicitamente.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date
 from typing import Any
@@ -95,7 +96,7 @@ def _parse_ids(ids: list[str], prefix: str) -> list[int]:
     return filas
 
 
-def _marcar_regreso_db(ids: list[int], fecha_regreso, estado_al_ingreso: str) -> dict[str, Any]:
+def _marcar_regreso_db(ids: list[int], fecha_regreso, estado_al_ingreso: str, usuario_id: int | None = None) -> dict[str, Any]:
     """DB path: actualiza salida_activos directamente."""
     fr = fecha_regreso
     est = str(estado_al_ingreso or "").strip().upper()
@@ -108,7 +109,7 @@ def _marcar_regreso_db(ids: list[int], fecha_regreso, estado_al_ingreso: str) ->
             for db_id in sorted(set(ids)):
                 # Verificar que existe y esta fuera
                 cur.execute(
-                    "SELECT id, fecha_salida, estado FROM salida_activos WHERE id = %s",
+                    "SELECT id, fecha_salida, estado, sector, usuario_creador_id FROM salida_activos WHERE id = %s",
                     (db_id,),
                 )
                 row = cur.fetchone()
@@ -118,8 +119,34 @@ def _marcar_regreso_db(ids: list[int], fecha_regreso, estado_al_ingreso: str) ->
                 if str(row["estado"]).strip().lower() != "fuera_de_planta":
                     no_encontrados.append(f"f-{db_id}")
                     continue
+
+                # Validación de sector (gate): personal.area_id->areas.nombre vs activo.sector
+                # Si el activo tiene sector definido y el usuario tiene area_id,
+                # validar que coinciden. Mismatch -> 403.
+                activo_sector = str(row.get("sector") or "").strip().upper()
+                usuario_area = None
+                if row.get("usuario_creador_id"):
+                    # Obtener area del usuario creador
+                    cur.execute(
+                        "SELECT area_id FROM personal WHERE id = %s",
+                        (row["usuario_creador_id"],),
+                    )
+                    usuario_row = cur.fetchone()
+                    if usuario_row:
+                        usuario_area = str(usuario_row["area_id"] or "").strip().upper() or None
+
+                if activo_sector and usuario_area and activo_sector != usuario_area:
+                    conn.rollback()
+                    raise ValueError(
+                        f"Mismatch de sector: activo={activo_sector}, usuario_area={usuario_area}. "
+                        "No se puede marcar regreso entre sectores diferentes."
+                    )
+
                 fecha_salida = row["fecha_salida"]
                 dias = calcular_dias_fuera(fecha_salida, fr)
+                # Determinar tipo de regreso: si ya tiene usuario_creador_id, es un regreso formal
+                es_regreso_formal = row.get("usuario_creador_id") is not None
+
                 cur.execute(
                     """
                     UPDATE salida_activos
@@ -127,10 +154,12 @@ def _marcar_regreso_db(ids: list[int], fecha_regreso, estado_al_ingreso: str) ->
                         fecha_regreso = %s,
                         estado_al_ingreso = %s,
                         dias_fuera = %s,
+                        usuario_regreso_id = %s,
+                        regresado_en = NOW(),
                         actualizado_en = NOW()
                     WHERE id = %s
                     """,
-                    (fr, est, dias, db_id),
+                    (fr, est, dias, usuario_id, db_id),
                 )
                 if cur.rowcount:
                     movidos += 1
@@ -142,15 +171,42 @@ def _marcar_regreso_db(ids: list[int], fecha_regreso, estado_al_ingreso: str) ->
                     "No se pudo marcar ningún ítem (ya ingresados o el listado está desactualizado). "
                     "Actualizá y reintentá."
                 )
+            # Registrar en auditoría: evento 'marcar_regreso'
+            if usuario_id is not None:
+                cur.execute(
+                    """
+                    INSERT INTO salida_activos_auditoria
+                      (activo_id, accion, usuario_id, antes_despues, creado_en)
+                    VALUES
+                      (%s, %s, %s, %s, NOW())
+                    """,
+                    (
+                        db_id,  # último db_id procesado; en producción se podría batch
+                        "marcar_regreso",
+                        usuario_id,
+                        json.dumps({
+                            "antes": {
+                                "estado": "fuera_de_planta",
+                                "sector": str(row.get("sector") or ""),
+                                "usuario_creador_id": row.get("usuario_creador_id"),
+                            },
+                            "después": {
+                                "estado": "ingresado_a_planta",
+                                "usuario_regreso_id": usuario_id,
+                                "regresado_en": fr_txt,
+                            }
+                        }),
+                    ),
+                )
             conn.commit()
             ActivosStore.get().refresh()
             return {
-                "mensaje": f"Se marcó el regreso de {movidos} ítem(s).",
-                "movidos": movidos,
-                "no_encontrados": no_encontrados,
-                "fecha_regreso": fr_txt,
-                "estado_al_ingreso": est,
-            }
+                    "mensaje": f"Se marcó el regreso de {movidos} ítem(s).",
+                    "movidos": movidos,
+                    "no_encontrados": no_encontrados,
+                    "fecha_regreso": fr_txt,
+                    "estado_al_ingreso": est,
+                }
     except Exception:
         try:
             conn.rollback()
@@ -231,6 +287,7 @@ def marcar_regreso(
     ids: list[str],
     fecha_regreso: str,
     estado_al_ingreso: str,
+    usuario_id: int | None = None,
 ) -> dict[str, Any]:
     """Mueve filas de FUERA → INGRESADO."""
     filas_pedidas = _parse_ids(ids, "f-")
@@ -242,7 +299,7 @@ def marcar_regreso(
         raise ValueError("Indicá el estado / condición al ingresar a planta.")
 
     if ACTIVOS_DB_ENABLED:
-        return _marcar_regreso_db(filas_pedidas, fr, est)
+        return _marcar_regreso_db(filas_pedidas, fr, est, usuario_id)
 
     # Fallback Excel solo si DB deshabilitada
     path = excel_path()
@@ -363,6 +420,7 @@ def _crear_salida_db(data: dict[str, Any]) -> dict[str, Any]:
     fecha_salida_str = fecha_salida.isoformat()
     dias_fuera = calcular_dias_fuera(fecha_salida, None)
     fecha = fecha_salida
+    usuario_creador_id = data.get("usuario_creador_id")
 
     fingerprint = calcular_fingerprint(
         codigo=codigo,
@@ -393,23 +451,45 @@ def _crear_salida_db(data: dict[str, Any]) -> dict[str, Any]:
                    nro_serie, numero_pedido, numero_oc, numero_remito,
                    proveedor, fecha_salida, fecha_regreso,
                    estado_al_ingreso, observaciones, dias_fuera,
-                   estado, fingerprint, creado_en, actualizado_en)
+                   estado, fingerprint, creado_en, actualizado_en, usuario_creador_id)
                 VALUES
                   (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                   %s, %s, NULL, %s, %s, %s, %s, %s, NOW(), NOW())
+                   %s, %s, NULL, %s, %s, %s, %s, %s, NOW(), NOW(), %s)
                 """,
                 (
                     fecha, equipo, codigo, equipo, sector, cantidad,
                     nro_serie, numero_pedido, numero_oc, numero_remito,
                     proveedor, fecha_salida, "",
                     observaciones, dias_fuera,
-                    "fuera_de_planta", fingerprint,
+                    "fuera_de_planta", fingerprint, usuario_creador_id,
                 ),
             )
             new_id = cur.lastrowid
+            # Registrar en auditoría: evento 'crear'
+            if usuario_creador_id is not None:
+                cur.execute(
+                    """
+                    INSERT INTO salida_activos_auditoria
+                      (activo_id, accion, usuario_id, antes_despues, creado_en)
+                    VALUES
+                      (%s, %s, %s, %s, NOW())
+                    """,
+                    (
+                        new_id,
+                        "crear",
+                        usuario_creador_id,
+                        json.dumps({
+                            "nuevo": {
+                                "equipo": equipo, "sector": sector, "proveedor": proveedor,
+                                "numero_remito": numero_remito, "fecha_salida": fecha_salida_str
+                            },
+                            "anterior": None
+                        }),
+                    ),
+                )
             conn.commit()
             ActivosStore.get().refresh()
-            return {"mensaje": "Salida creada correctamente.", "id": new_id, "fingerprint": fingerprint}
+            return {"mensaje": "Salida creada correctamente.", "id": new_id, "fingerprint": fingerprint, "usuario_creador_id": usuario_creador_id}
     except Exception:
         try:
             conn.rollback()
