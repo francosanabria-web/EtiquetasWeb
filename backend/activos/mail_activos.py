@@ -111,6 +111,216 @@ def _bg(d):
         return "#FFEB9C"
     return "#C6EFCE"
 
+
+def notify_cambio(evento: str, registro: dict) -> None:
+    """Dispara mail inmediato tras create/edit/regreso.
+
+    Se ejecuta en hilo separado (thread + try/except) para nunca bloquear la respuesta.
+    Respeta ACTIVOS_FOTOS_ENABLED. Formato: asunto/cuerpo minimos + TODO formato.
+    El caller debe pasar un diccionario 'registro' con los datos relevantes.
+    """
+    # Respeta feature flag
+    from db import ACTIVOS_FOTOS_ENABLED
+    if not ACTIVOS_FOTOS_ENABLED:
+        return
+
+    try:
+        # Ejecutar en hilo separado para no bloquear respuesta
+        import threading
+        import time as _time
+
+        def _send():
+            try:
+                # Datos minimos del registro
+                act_id = registro.get("id", "")
+                act_desc = registro.get("equipo", "")
+                sector = registro.get("sector", "")
+                usuario = registro.get("usuario", "")
+                fecha = _time.strftime("%Y-%m-%d %H:%M:%S")
+                cambio = registro.get("cambio", "")
+
+                # Asunto minimo
+                asunto = f"Activos: {evento} - ID {act_id}"
+
+                # Cuerpo minimo (formato pending - TODO)
+                cuerpo = f"""\
+Activo ID: {act_id}
+Descripcion: {act_desc}
+Sector: {sector}
+Usuario: {usuario}
+Fecha: {fecha}
+Cambio: {cambio}
+                """
+
+                # Enviar via SMTP (misma logica que run_activos_si_habilitado)
+                import os, sys
+                from pathlib import Path
+                from datetime import date, datetime
+                import html as _html
+                import smtplib
+                from email.mime.multipart import MIMEMultipart
+                from email.mime.text import MIMEText
+
+                REPORTES_PATH = Path(__file__).resolve().parent.parent / "reportes"
+
+                def _cargar_env_reportes():
+                    for p in [REPORTES_PATH / ".env", REPORTES_PATH.parent / ".env"]:
+                        if p.is_file():
+                            for raw in p.read_text(encoding="utf-8").splitlines():
+                                line = raw.strip()
+                                if not line or line.startswith("#") or "=" not in line:
+                                    continue
+                                k, _, v = line.partition("=")
+                                k, v = k.strip(), v.strip().strip('"').strip("'")
+                                if k and k not in os.environ:
+                                    os.environ[k] = v
+
+                _cargar_env_reportes()
+
+                def _smtp_creds():
+                    if str(REPORTES_PATH) not in sys.path:
+                        sys.path.insert(0, str(REPORTES_PATH))
+                    try:
+                        import config as rep_cfg  # noqa
+                    except Exception:
+                        pass
+                    user = (os.environ.get("PANOL_SMTP_USER") or os.environ.get("PANOL_SMTP_FROM") or "").strip()
+                    pwd = (os.environ.get("PANOL_SMTP_PASSWORD") or "").strip()
+                    from_addr = (os.environ.get("PANOL_SMTP_FROM") or user).strip()
+                    host = os.environ.get("PANOL_SMTP_HOST", "smtp.gmail.com").strip()
+                    port = int(os.environ.get("PANOL_SMTP_PORT", "587"))
+                    if not user or not pwd:
+                        return
+                    return host, port, user, pwd, from_addr
+
+                creds = _smtp_creds()
+                if not creds:
+                    # Si no hay credenciales, solo loguear y retornar
+                    print(f"notify_cambio: SMTP no configurado, evento={evento}, id={act_id}")
+                    return
+
+                host, port, user, pwd, from_addr = creds
+
+                msg = MIMEMultipart("mixed")
+                msg["From"] = from_addr
+                msg["To"] = "pañol"  # destinatario designo
+                msg["Subject"] = asunto
+                txt = f"Activos: {evento} - ID {act_id} - {fecha}"
+                alt = MIMEMultipart("alternative")
+                alt.attach(MIMEText(txt, "plain", "utf-8"))
+                msg.attach(alt)
+
+                with smtplib.SMTP(host, port, timeout=45) as s:
+                    s.starttls()
+                    s.login(user, pwd)
+                    s.sendmail(from_addr, ["pañol@panol.local"], msg.as_string())
+            except Exception as e:
+                # Nunca lanzar error al caller - try/except completo
+                print(f"notify_cambio error (silenciado): {e}")
+
+        t = threading.Thread(target=_send, daemon=True)
+        t.start()
+    except Exception:
+        # Fallo absoluto: no bloquear caller
+        print(f"notify_cambio outer error (silenciado): {__import__('sys').exc_info()[1]}")
+
+
+def alerta_sobreextendido() -> dict:
+    """Verifica registros fuera_de_planta sin fecha_regreso y envia alerts.
+
+    - DIAS_AVISO=21: alerta advisory si supera los 21 dias
+    - DIAS_ALERTA=30: alerta critica si supera los 30 dias
+    - Solo envia si no tiene fecha_regreso (aun esta fuera)
+    - Loggea el evento en consola (o integrate con logger formal despues)
+    Returns dict con el resumen de alerts enviadas.
+    """
+    from db import get_connection, ACTIVOS_DB_ENABLED
+    from config import DIAS_AVISO, DIAS_ALERTA
+    from mail_activos import notify_cambio
+
+    if not ACTIVOS_DB_ENABLED:
+        return {"enviado": False, "motivo": "ACTIVOS_DB_ENABLED=0", "advisory": 0, "critical": 0}
+
+    try:
+        conn = get_connection()
+        with conn.cursor() as cur:
+            # Query: fuera_de_planta sin fecha_regreso
+            cur.execute(
+                """
+                SELECT id, equipo, fecha_salida, usuario_creador_id
+                FROM salida_activos
+                WHERE estado = 'fuera_de_planta' AND fecha_regreso IS NULL
+                """,
+            )
+            rows = cur.fetchall()
+
+        advisory_count = 0
+        critical_count = 0
+        ahora = date.today()
+
+        for row in rows:
+            db_id = row["id"]
+            equipo = row["equipo"]
+            fecha_salida = row["fecha_salida"]
+            if isinstance(fecha_salida, date):
+                dias_fuera = (ahora - fecha_salida).days
+            else:
+                # Formato string YYYY-MM-DD
+                try:
+                    from datetime import datetime
+                    fs = datetime.strptime(str(fecha_salida), "%Y-%m-%d").date()
+                    dias_fuera = (ahora - fs).days
+                except Exception:
+                    continue
+
+            usuario_id = row.get("usuario_creador_id")
+
+            # Determinar nivel de alerta
+            if dias_fuera >= DIAS_ALERTA:
+                evento = "alerta_critica"
+                mensaje = f"Alerta: superado limite de {DIAS_ALERTA} dias — requiere accion inmediata"
+                # Enviar advisory critica
+                try:
+                    registro = {
+                        "id": db_id,
+                        "equipo": equipo,
+                        "sector": "",
+                        "usuario": usuario_id,
+                        "cambio": f"{evento}: {dias_fuera} dias fuera",
+                    }
+                    notify_cambio(evento, registro)
+                    critical_count += 1
+                except Exception:
+                    pass
+            elif dias_fuera >= DIAS_AVISO:
+                evento = "alerta_advisory"
+                mensaje = f"Aviso: superado limite de {DIAS_AVISO} dias"
+                # Enviar advisory
+                try:
+                    registro = {
+                        "id": db_id,
+                        "equipo": equipo,
+                        "sector": "",
+                        "usuario": usuario_id,
+                        "cambio": f"{evento}: {dias_fuera} dias fuera",
+                    }
+                    notify_cambio(evento, registro)
+                    advisory_count += 1
+                except Exception:
+                    pass
+            # else: below threshold, no alert
+
+        conn.close()
+        return {
+            "enviado": True,
+            "advisory": advisory_count,
+            "critical": critical_count,
+            "total_revisados": len(rows),
+        }
+    except Exception as e:
+        print(f"alerta_sobreextendido error: {e}")
+        return {"enviado": False, "motivo": str(e), "advisory": 0, "critical": 0}
+
 def armar_html_activos(fecha=None):
     """Genera HTML de activos fuera con formato fijo corregido."""
     from store import ActivosStore

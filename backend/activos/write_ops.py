@@ -398,6 +398,17 @@ def restablecer_fuera(ids: list[str]) -> dict[str, Any]:
     }
 
 
+def alerta_sobreextendido() -> dict:
+    """Wrapper que delega la verificacion de alerts sobreextendidas.
+
+    Consulta salida_activos por registros fuera_de_planta sin fecha_regreso,
+    y dispara alerts advisory (21 dias) o critica (30 dias) via notify_cambio.
+    Retorna resumen de alerts enviadas.
+    """
+    from mail_activos import alerta_sobreextendido as _internal
+    return _internal()
+
+
 # ──────────────────────────────────────────────────────────
 # Crear nueva salida
 # ──────────────────────────────────────────────────────────
@@ -512,7 +523,23 @@ def crear_salida(data: dict[str, Any]) -> dict[str, Any]:
     fecha_input = data.get("fecha_salida") or _hoy_iso()
     fecha_salida = _parsear_fecha_input(fecha_input)
     data["fecha_salida"] = fecha_salida.isoformat()
-    return _crear_salida_db(data)
+    result = _crear_salida_db(data)
+    # Disparar mail inmediato de notificacion (hilo separado, nunca bloquea)
+    try:
+        from mail_activos import notify_cambio
+        # Registro con datos del cambio
+        registro = {
+            "id": result.get("id"),
+            "equipo": data.get("equipo", ""),
+            "sector": data.get("sector", ""),
+            "usuario": data.get("usuario_creador_id", ""),
+            "cambio": "crear",
+        }
+        notify_cambio("crear", registro)
+    except Exception:
+        # Nunca bloquea la respuesta del create
+        pass
+    return result
 
 
 # ──────────────────────────────────────────────────────────
@@ -648,6 +675,19 @@ def _editar_activo_db(db_id: int, data: dict[str, Any]) -> dict[str, Any]:
                 ),
             )
             conn.commit()
+            # Disparar mail inmediato de notificacion por edicion (hilo separado)
+            try:
+                from mail_activos import notify_cambio
+                registro = {
+                    "id": db_id,
+                    "equipo": nuevo_equipo,
+                    "sector": nuevo_sector,
+                    "usuario": data.get("usuario_creador_id", ""),
+                    "cambio": "editar",
+                }
+                notify_cambio("editar", registro)
+            except Exception:
+                pass
             ActivosStore.get().refresh()
             return {"mensaje": "Activo actualizado correctamente."}
     except Exception:
