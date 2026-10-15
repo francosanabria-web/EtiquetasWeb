@@ -293,6 +293,10 @@ async def post_subir_fotos(request: Request) -> JSONResponse:
 
     fotos_data = []
 
+    # Tipo de operación: explicit desde el frontend ("retiro" o "ingreso")
+    # El backend antes usaba un conteo simplificado; ahora se respeta el valor enviado
+    tipo = str(files.get("tipo", "retiro")).strip().lower() or "retiro"
+
     for field_name in ["foto1", "foto2", "foto3"]:
         file = files.get(field_name)
         if file is None:
@@ -321,7 +325,7 @@ async def post_subir_fotos(request: Request) -> JSONResponse:
         b64 = base64.b64encode(data).decode('utf-8')
 
         fotos_data.append({
-            "tipo": "retiro" if len(fotos_data) < 2 else "ingreso",  # simplificado
+            "tipo": tipo,
             "foto_b64": b64,
             "hash_sha256": hash_sha256,
             "mime": content_type,

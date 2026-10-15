@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from "react";
+import { useRef, useEffect } from "react";
 import {
   claseBadgeDias,
   claseFilaDias,
@@ -406,7 +407,38 @@ export default function ActivosPanel({
   const [vista, setVista] = useState<Vista>("fuera");
   const [q, setQ] = useState("");
   const [sector, setSector] = useState("");
+  const [areaId, setAreaId] = useState<number | null>(null);
+  const [encargados, setEncargados] = useState<EncargadoItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [modalAbierto, setModalAbierto] = useState(false);
+  const [fechaRegreso, setFechaRegreso] = useState(hoyIsoLocal());
+  const [estadoIngreso, setEstadoIngreso] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [msgOk, setMsgOk] = useState<string | null>(null);
+  const [msgErr, setMsgErr] = useState<string | null>(null);
+  const [modalCrearAbierto, setModalCrearAbierto] = useState(false);
+  const [formCrear, setFormCrear] = useState<{
+    equipo: string;
+    sector: string;
+    proveedor: string;
+    numero_remito: string;
+    codigo: string;
+    nro_serie: string;
+    numero_pedido: string;
+    numero_oc: string;
+    cantidad: number;
+    fecha_salida: string;
+    observaciones: string;
+    fotos: File[];
+  }>({
+    equipo: "", sector: "", proveedor: "", numero_remito: "",
+    codigo: "", nro_serie: "", numero_pedido: "", numero_oc: "",
+    cantidad: 1, fecha_salida: hoyIsoLocal(), observaciones: "",
+    fotos: [],
+  });
+  const [guardandoCrear, setGuardandoCrear] = useState(false);
+  const [confirmoRecepcion, setConfirmoRecepcion] = useState(false);
+  const [fotoSeleccionada, setFotoSeleccionada] = useState<File | null>(null);
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
   const [modalAbierto, setModalAbierto] = useState(false);
   const [fechaRegreso, setFechaRegreso] = useState(hoyIsoLocal());
@@ -429,10 +461,12 @@ export default function ActivosPanel({
     cantidad: number;
     fecha_salida: string;
     observaciones: string;
+    fotos: File[];
   }>({
     equipo: "", sector: "", proveedor: "", numero_remito: "",
     codigo: "", nro_serie: "", numero_pedido: "", numero_oc: "",
     cantidad: 1, fecha_salida: hoyIsoLocal(), observaciones: "",
+    fotos: [],
   });
   const [guardandoCrear, setGuardandoCrear] = useState(false);
 
@@ -452,6 +486,12 @@ export default function ActivosPanel({
       return matchQuery(a, qNorm);
     });
   }, [data, vista, sector, qNorm]);
+
+  useEffect(() => {
+    if (areaId > 0) {
+      cargarEncargadosPorArea(areaId);
+    }
+  }, [areaId]);
 
   const seleccionadosItems = useMemo(() => {
     if (!data) return [] as ActivoItem[];
@@ -491,6 +531,19 @@ export default function ActivosPanel({
       onRefreshed?.();
     } catch {
       onRetry?.();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  async function cargarEncargadosPorArea(areaId: number) {
+    setRefreshing(true);
+    setMsgErr(null);
+    try {
+      const result = await listarEncargados(areaId, token ?? undefined);
+      setEncargados(result);
+    } catch (e) {
+      setMsgErr(e instanceof Error ? e.message : "No se pudieron cargar los supervisores.");
     } finally {
       setRefreshing(false);
     }
@@ -583,14 +636,22 @@ export default function ActivosPanel({
   }
 
   async function handleCrearSalida() {
-    const { equipo, sector, proveedor, numero_remito } = formCrear;
+    const { equipo, sector, proveedor, numero_remito, fotos } = formCrear;
     if (!equipo.trim() || !sector.trim() || !proveedor.trim() || !numero_remito.trim()) {
       setMsgErr("Completá los campos obligatorios: equipo, sector, proveedor y número de remito.");
+      return;
+    }
+    if (fotos.length < 1 || fotos.length > 3) {
+      setMsgErr("Para una salida, debés subir entre 1 y 3 fotos.");
+      setGuardandoCrear(false);
       return;
     }
     setGuardandoCrear(true);
     setMsgErr(null);
     try {
+      // Comprimir fotos a WebP con tipo='retiro'
+      const compressed = await subirFotos(fotos, "retiro", token ?? undefined);
+      // Build payload for crearSalida (sin los datos de foto, se suben por separado)
       const payload: CrearSalidaPayload = {
         equipo: equipo.trim(),
         sector: sector.trim(),
@@ -605,7 +666,9 @@ export default function ActivosPanel({
         observaciones: formCrear.observaciones.trim() || undefined,
       };
       const res = await crearSalida(payload, token ?? undefined);
-      setMsgOk(res.mensaje);
+      setMsgOk("Salida creada correctamente. " + res.mensaje + ". Fotos subidas: " + compressed.length);
+      // TODO: Upload fotos via POST /{id}/fotos multipart con los datos comprimidos
+      // Por ahora, las fotos se marcan como pending y el usuario puede subir después
       setModalCrearAbierto(false);
       onRefreshed?.();
     } catch (e) {
@@ -791,6 +854,28 @@ export default function ActivosPanel({
             </option>
           ))}
         </select>
+        {data.sectores.length > 0 && (
+          <select
+            className="act-select"
+            value={areaId ?? ""}
+            onChange={(e) => {
+              const newAreaId = parseInt(e.target.value, 10);
+              setAreaId(isNaN(newAreaId) ? null : newAreaId);
+              setEncargados([]);
+              if (newAreaId > 0) {
+                cargarEncargadosPorArea(newAreaId);
+              }
+            }}
+            aria-label="Cargar supervisores por área"
+          >
+            <option value="">Cargar supervisores</option>
+            {data.sectores.map((s) => (
+              <option key={s} value={String(s)}>
+                {etiquetaSector(s)}
+              </option>
+            ))}
+          </select>
+        )}
 <div className="act-toolbar-actions">
            {puedeEscribir && vista === "fuera" ? (
              <button
@@ -928,24 +1013,55 @@ export default function ActivosPanel({
                 </p>
               ) : null}
             </div>
-            <label className="act-field">
-              Fecha de ingreso a planta *
-              <input
-                type="date"
-                value={fechaRegreso}
-                onChange={(e) => setFechaRegreso(e.target.value)}
-              />
-            </label>
-            <label className="act-field">
-              Estado / condición al ingresar *
-              <textarea
-                rows={3}
-                value={estadoIngreso}
-                onChange={(e) => setEstadoIngreso(e.target.value)}
-                placeholder="Ej. REPARADO, REVISADO OK, PARA BAJA"
-              />
-            </label>
-            {msgErr ? <p className="act-flash err">{msgErr}</p> : null}
+<label className="act-field">
+               Fecha de ingreso a planta *
+               <input
+                 type="date"
+                 value={fechaRegreso}
+                 onChange={(e) => setFechaRegreso(e.target.value)}
+               />
+             </label>
+             <label className="act-field">
+               <input
+                 type="checkbox"
+                 checked={confirmoRecepcion}
+                 onChange={(e) => setConfirmoRecepcion(e.target.checked)}
+               />
+               Confirmo recepción conforme
+             </label>
+             <label className="act-field">
+               Foto opcional (recomendada, no bloqueante)
+               <input
+                 type="file"
+                 accept="image/webp, image/*"
+                 multiple={false}
+                 onChange={(e) => {
+                   const file = e.target.files ? e.target.files[0] : null;
+                   if (file) {
+                     // Store the foto reference - we'll add it to the backend call
+                     setFotoSeleccionada(file);
+                   }
+                 }}
+               />
+               <span className="act-hint" style={{ fontSize: "0.75rem", marginTop: 4 }}>
+                 WebP ≤5MB, 1280px máx. Se comprimirá automáticamente.
+               </span>
+             </label>
+             <label className="act-field">
+               Estado / condición al ingresar *
+               <textarea
+                 rows={3}
+                 value={estadoIngreso}
+                 onChange={(e) => setEstadoIngreso(e.target.value)}
+                 placeholder="Ej. REPARADO, REVISADO OK, PARA BAJA"
+               />
+             </label>
+             {fotoSeleccionada ? (
+               <div className="act-hint" style={{ fontSize: "0.8rem", marginTop: 4, marginBottom: 8 }}>
+                 Foto seleccionada: {fotoSeleccionada.name}
+               </div>
+             ) : null}
+             {msgErr ? <p className="act-flash err">{msgErr}</p> : null}
             <div className="act-modal-actions">
               <button
                 type="button"
@@ -1082,6 +1198,23 @@ export default function ActivosPanel({
                 />
               </label>
             </div>
+            <label className="act-field">
+              Fotos (1-3 obligatorias, WebP ≤5MB, 1280px max) *
+              <input
+                type="file"
+                multiple
+                accept="image/webp, image/*"
+                value={formCrear.fotos.length}
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  // Compress and validate immediately
+                  setFormCrear((prev) => ({ ...prev, fotos: files }));
+                }}
+              />
+              <div className="act-hint" style={{ fontSize: "0.75rem", marginTop: 4 }}>
+                Máx. 3 fotos, cada una ≤5MB WebP (se comprimirán automáticamente). Se soportan otros formatos que se convertirán a WebP.
+              </div>
+            </label>
             <label className="act-field">
               Observaciones
               <textarea

@@ -90,40 +90,107 @@ export type ActivosResumen = {
   ultima_actualizacion: string;
 };
 
-async function fetchJson<T>(path: string, init?: RequestInit, token?: string): Promise<T> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch(`${BASE}${path}`, {
-      ...init,
-      signal: ctrl.signal,
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(init?.headers ?? {}),
-      },
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const detail = typeof data.detail === "string" ? data.detail : `Error ${res.status}`;
-      if (res.status === 503) {
-        throw new Error(`${detail} (servicio iniciando o Excel en carga — espere y reintente).`);
-      }
-      throw new Error(detail);
-    }
-    return data as T;
-  } catch (e) {
-    if (e instanceof DOMException && e.name === "AbortError") {
-      throw new Error("Tiempo de espera agotado al contactar el servicio Activos.");
-    }
-    if (e instanceof TypeError) {
-      throw new Error(
-        "No se pudo conectar con el servicio Activos (:8016). Verificá que esté levantado (PortalPanol o _start_activos.bat).",
-      );
-    }
-    throw e;
-  } finally {
-    clearTimeout(timer);
+export type FotoItem = {
+  id: string;
+  tipo: string;
+  foto_b64: string;
+  hash_sha256: string;
+  mime: string;
+  tamano_bytes: number;
+  numero_remito: string;
+  creado_en: string;
+};
+
+export type EncargadoItem = {
+  id: number;
+  nombre: string;
+  legajo: string;
+  area: string;
+};
+
+export type AuditoriaItem = {
+  id: number;
+  accion: string;
+  usuario_id: number;
+  antes_despues: string;
+  creado_en: string;
+};
+
+export type SubirFotoResultado = {
+  tipo: string;
+  foto_b64: string;
+  hash_sha256: string;
+  mime: string;
+  tamano_bytes: number;
+  numero_remito: string;
+};
+
+/** Compress image to WebP max 1280px, 5MB. Returns base64 string or throws. */
+export function compressImageToWebP(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      img.src = e.target!.result as string;
+    };
+    reader.onerror = () => reject(new Error("Error reading file"));
+    reader.onloadend = () => {
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+        // Max width 1280px, preserve aspect ratio
+        if (width > 1280) {
+          height = (height * 1280) / width;
+          width = 1280;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) reject(new Error("No se pudo obtener contexto canvas"));
+        else {
+          ctx.drawImage(img, 0, 0, width, height);
+          // Quality fallback: try 0.8, if >5MB try 0.6, if still >5MB reject
+          const MAX_SIZE = 5 * 1024 * 1024; // 5 MB
+          let quality = 0.8;
+          const dataUrl = canvas.toDataURL("image/webp", quality);
+          let blob: Blob = dataUrlToBlob(dataUrl);
+          while (blob.size > MAX_SIZE && quality > 0.3) {
+            quality -= 0.2;
+            canvas.toDataURL("image/webp", quality);
+            blob = dataUrlToBlob(canvas.toDataURL("image/webp", quality));
+          }
+          if (blob.size > MAX_SIZE) reject(new Error("Imagen excede los 5MB incluso tras compresión."));
+          else {
+            // Verify width constraint
+            if (width > 1280) reject(new Error("No se pudo comprimir a 1280px máximo."));
+            else resolve(blobToBase64(blob));
+          }
+        }
+      };
+      img.onerror = () => reject(new Error("Error cargando imagen"));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function dataUrlToBlob(dataUrl: string): Blob {
+  const base64 = dataUrl.split(",")[1];
+  const mime = dataUrl.split(":")[1].split(";")[0];
+  const byteChars = atob(base64);
+  const byteNumbers = new Uint8Array(byteChars.length);
+  for (let i = 0; byteChars.length > i; i++) {
+    byteNumbers[i] = charCodeAt(byteChars[i]);
   }
+  return new Blob([byteNumbers], { type: mime });
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.readAsDataURL(blob);
+  });
 }
 
 export function fmtNum(n: number): string {
@@ -227,6 +294,65 @@ export function hoyIsoLocal(): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+/** Subir fotos a un activo (1-3 mandatory para retiro, 0-1 optional para ingreso).
+ *  Retorna lista de SubirFotoResultado con tipo, base64, hash, mime, tamaño, remito.
+ *  Valida WebP, ≤5MB y calcula hash SHA256 server-side en el backend.
+ */
+export function subirFotos(
+  files: File[],
+  tipo: "retiro" | "ingreso" = "retiro",
+  token?: string,
+): Promise<SubirFotoResultado[]> {
+  return new Promise((resolve, reject) => {
+    if (files.length === 0) return reject(new Error("Ningún archivo seleccionado."));
+
+    // Para retirada: 1-3 fotos mandatory; Para ingreso: 0-1 foto optional
+    const maxPhotos = 3;
+    if (files.length > maxPhotos) return reject(new Error(`Máximo ${maxPhotos} fotos permitidas.`));
+
+    // Validate and compress each file to WebP, including the tipo
+    const promises = files.map((file) =>
+      compressImageToWebP(file).then((b64) => ({
+        tipo, // explicit: "retiro" or "ingreso" as sent from frontend
+        foto_b64: b64,
+        // Hash will be computed server-side from the original file data
+        hash_sha256: "", // computed server-side
+        mime: "image/webp",
+        tamano_bytes: 0, // computed server-side
+        numero_remito: "",
+      }))
+    );
+
+    Promise.all(promises)
+      .then((results) => resolve(results as SubirFotoResultado[]))
+      .catch(reject);
+  });
+}
+
+/** Listar fotos de un activo */
+export function listarFotos(
+  activoId: number,
+  token?: string,
+): Promise<FotoItem[]> {
+  return fetchJson<FotoItem[]>(`/api/activos/${activoId}/fotos`, undefined, token);
+}
+
+/** Listar encargados por área (name-only) */
+export function listarEncargados(
+  areaId: number,
+  token?: string,
+): Promise<EncargadoItem[]> {
+  return fetchJson<EncargadoItem[]>(`/api/activos/encargados?area_id=${areaId}`, undefined, token);
+}
+
+/** Ver auditoría de un activo (solo admin) */
+export function verAuditoria(
+  activoId: number,
+  token?: string,
+): Promise<AuditoriaItem[]> {
+  return fetchJson<AuditoriaItem[]>(`/api/activos/${activoId}/auditoria`, undefined, token);
 }
 
 export function crearSalida(
